@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/auth",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./token-storage": "./src/token-storage.ts"
+  }
+}

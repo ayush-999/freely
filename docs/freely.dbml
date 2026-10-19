@@ -1,0 +1,1040 @@
+Project freely {
+  database_type: 'SQL Server'
+  Note: 'Professional social network and microblogging platform with organizations, departments, anonymous post lookup, grievance management, AI assessment, SLA monitoring, escalation, notifications and auditing.'
+}
+
+// SQL Server implementation notes:
+// 1. Store enum-like values as NVARCHAR and enforce them with CHECK constraints.
+// 2. Use UTC consistently (SYSUTCDATETIME()) for application timestamps.
+// 3. Store uploaded files in protected object/file storage; persist only metadata and storage keys.
+// 4. Use transactions for multi-table workflow changes.
+// 5. Social visibility and grievance access must be enforced in the backend.
+// 6. Generate posts.public_post_id with a cryptographically secure random identifier in the application.
+// 7. For guest posts, author_user_id is NULL. For registered users posting anonymously, retain author_user_id internally and set is_anonymous = 1.
+// 8. Organization and department scope must be validated in backend logic and, where practical, by database constraints.
+
+// ============================================================
+// 1. USERS, ORGANIZATIONS, DEPARTMENTS, MEMBERSHIPS AND ACCESS CONTROL
+// ============================================================
+
+Table users {
+  id bigint [pk, increment]
+  user_handle nvarchar(50) [not null, unique, note: 'Public username, e.g. @ayush']
+  full_name nvarchar(150) [not null]
+  email nvarchar(255) [unique]
+  phone nvarchar(20) [unique]
+  password_hash nvarchar(255)
+  bio nvarchar(500)
+  avatar_storage_key nvarchar(500)
+  cover_storage_key nvarchar(500)
+  website_url nvarchar(500)
+  preferred_language nvarchar(20)
+  is_verified bit [not null, default: 0]
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+}
+
+Table organizations {
+  id bigint [pk, increment]
+  name nvarchar(200) [not null]
+  slug nvarchar(220) [not null, unique]
+  organization_type nvarchar(40) [not null, note: 'school, university, private_organization, government_organization, ngo, other']
+  description nvarchar(max)
+  website_url nvarchar(500)
+  logo_storage_key nvarchar(500)
+  contact_email nvarchar(255)
+  contact_phone nvarchar(20)
+  address nvarchar(max)
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  created_by_user_id bigint [not null, note: 'Registered user who initially creates the organization']
+  verification_status nvarchar(20) [not null, default: 'unverified', note: 'unverified, pending, verified, rejected']
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    organization_type
+    created_by_user_id
+    verification_status
+    is_active
+  }
+}
+
+Table organization_roles {
+  id bigint [pk, increment]
+  organization_id bigint [not null]
+  name nvarchar(100) [not null, note: 'e.g. Owner, Organization Admin, Director, CEO, MD']
+  code nvarchar(40) [not null, note: 'e.g. owner, organization_admin, director, ceo, md']
+  description nvarchar(max)
+  can_manage_organization bit [not null, default: 0]
+  can_manage_departments bit [not null, default: 0]
+  can_manage_members bit [not null, default: 0]
+  can_manage_organization_posts bit [not null, default: 0]
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (organization_id, code) [unique]
+    organization_id
+  }
+}
+
+Table organization_memberships {
+  id bigint [pk, increment]
+  organization_id bigint [not null]
+  user_id bigint [not null]
+  organization_role_id bigint [not null]
+  membership_status nvarchar(20) [not null, default: 'active', note: 'active, invited, suspended, ended']
+  is_primary bit [not null, default: 0]
+  start_date date
+  end_date date
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    (organization_id, user_id) [unique]
+    user_id
+    organization_role_id
+    membership_status
+  }
+}
+
+Table departments {
+  id bigint [pk, increment]
+  organization_id bigint [not null]
+  parent_department_id bigint
+  name nvarchar(150) [not null]
+  code nvarchar(30) [not null]
+  description nvarchar(max)
+  contact_email nvarchar(255)
+  contact_phone nvarchar(20)
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (organization_id, code) [unique]
+    organization_id
+    parent_department_id
+    is_active
+  }
+}
+
+Table department_roles {
+  id bigint [pk, increment]
+  department_id bigint [not null]
+  name nvarchar(100) [not null, note: 'Role title within a department, e.g. Department Head, Grievance Manager, Case Officer, Reviewer']
+  code nvarchar(40) [not null]
+  description nvarchar(max)
+  permission_level int [not null, default: 10, note: 'Application-defined permission tier; enforce granular permissions in backend']
+  can_manage_members bit [not null, default: 0]
+  can_manage_grievances bit [not null, default: 0]
+  can_review_ai bit [not null, default: 0]
+  can_manage_sla bit [not null, default: 0]
+  can_audit bit [not null, default: 0]
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (department_id, code) [unique]
+  }
+}
+
+Table department_memberships {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  department_id bigint [not null]
+  department_role_id bigint [not null]
+  manager_user_id bigint [note: 'Optional reporting manager; must be validated to belong to a compatible organization scope']
+  job_title nvarchar(150)
+  employee_number nvarchar(80)
+  membership_status nvarchar(20) [not null, default: 'active', note: 'active, invited, suspended, ended']
+  start_date date
+  end_date date
+  is_primary bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    (user_id, department_id) [unique]
+    department_id
+    department_role_id
+    manager_user_id
+    membership_status
+  }
+}
+
+Table platform_roles {
+  id bigint [pk, increment]
+  name nvarchar(80) [not null, unique, note: 'Platform-wide role, e.g. platform_admin, moderation_admin, auditor']
+  description nvarchar(max)
+}
+
+Table user_platform_roles {
+  user_id bigint [not null]
+  platform_role_id bigint [not null]
+  assigned_by_user_id bigint
+  assigned_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (user_id, platform_role_id) [pk]
+  }
+}
+
+// ============================================================
+// 2. SOCIAL GRAPH AND MICROBLOGGING POSTS
+// ============================================================
+
+Table user_follows {
+  follower_user_id bigint [not null]
+  followed_user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (follower_user_id, followed_user_id) [pk]
+    followed_user_id
+    created_at
+  }
+}
+
+Table posts {
+  id bigint [pk, increment]
+  author_user_id bigint [note: 'NULL for a guest/anonymous post with no account; retain user_id internally when a registered user chooses anonymous display']
+  public_post_id nvarchar(40) [not null, unique, note: 'Public lookup identifier printed on receipts and used to retrieve the post; generate securely in the application']
+  is_anonymous bit [not null, default: 0, note: 'When 1, do not show the registered author publicly; guest posts also set this to 1']
+  body nvarchar(max) [not null]
+  post_type nvarchar(20) [not null, default: 'post', note: 'post, reply, quote']
+  visibility nvarchar(20) [not null, default: 'public', note: 'public, followers, department, private']
+  reply_to_post_id bigint
+  quote_post_id bigint
+  is_sensitive bit [not null, default: 0]
+  is_pinned bit [not null, default: 0]
+  moderation_status nvarchar(20) [not null, default: 'visible', note: 'visible, hidden, removed, under_review']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+  deleted_at datetime2
+
+  indexes {
+    author_user_id
+    created_at
+    (visibility, created_at)
+    reply_to_post_id
+    quote_post_id
+    moderation_status
+  }
+}
+
+Table post_media {
+  id bigint [pk, increment]
+  post_id bigint [not null]
+  uploaded_by_user_id bigint [note: 'NULL when uploaded by a guest author']
+  file_name nvarchar(255) [not null]
+  storage_key nvarchar(500) [not null]
+  mime_type nvarchar(120)
+  file_size_bytes bigint
+  alt_text nvarchar(500)
+  media_type nvarchar(20) [not null, note: 'image, video, document']
+  sort_order int [not null, default: 0]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+}
+
+Table post_likes {
+  post_id bigint [not null]
+  user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (post_id, user_id) [pk]
+    user_id
+    created_at
+  }
+}
+
+Table post_reposts {
+  post_id bigint [not null]
+  user_id bigint [not null]
+  repost_type nvarchar(20) [not null, default: 'repost', note: 'repost, quote']
+  quote_post_id bigint
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (post_id, user_id) [pk]
+    user_id
+    created_at
+  }
+}
+
+Table post_bookmarks {
+  post_id bigint [not null]
+  user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (post_id, user_id) [pk]
+    user_id
+  }
+}
+
+Table post_comments {
+  id bigint [pk, increment]
+  post_id bigint [not null]
+  user_id bigint [not null]
+  parent_comment_id bigint
+  body nvarchar(max) [not null]
+  moderation_status nvarchar(20) [not null, default: 'visible', note: 'visible, hidden, removed, under_review']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+  deleted_at datetime2
+
+  indexes {
+    post_id
+    user_id
+    parent_comment_id
+    created_at
+  }
+}
+
+Table comment_likes {
+  comment_id bigint [not null]
+  user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (comment_id, user_id) [pk]
+    user_id
+  }
+}
+
+Table hashtags {
+  id bigint [pk, increment]
+  tag nvarchar(100) [not null, unique]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+}
+
+Table post_hashtags {
+  post_id bigint [not null]
+  hashtag_id bigint [not null]
+
+  indexes {
+    (post_id, hashtag_id) [pk]
+    hashtag_id
+  }
+}
+
+Table post_mentions {
+  id bigint [pk, increment]
+  post_id bigint [not null]
+  mentioned_user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (post_id, mentioned_user_id) [unique]
+    mentioned_user_id
+  }
+}
+
+Table post_views {
+  id bigint [pk, increment]
+  post_id bigint [not null]
+  viewer_user_id bigint
+  anonymous_view_key nvarchar(100)
+  viewed_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    post_id
+    viewer_user_id
+    viewed_at
+  }
+}
+
+// ============================================================
+// 3. GRIEVANCE CATEGORIES, GRIEVANCES AND ATTACHMENTS
+// ============================================================
+
+Table grievance_categories {
+  id bigint [pk, increment]
+  parent_category_id bigint
+  name nvarchar(120) [not null]
+  code nvarchar(40) [not null, unique]
+  description nvarchar(max)
+  default_department_id bigint
+  is_active bit [not null, default: 1]
+}
+
+Table grievances {
+  id bigint [pk, increment]
+  tracking_number nvarchar(40) [not null, unique]
+  user_id bigint [not null, note: 'Submitting citizen; define a separate guest-submission design if anonymous users need no account']
+  category_id bigint [not null]
+  title nvarchar(250) [not null]
+  description nvarchar(max) [not null]
+  location_text nvarchar(max)
+  address nvarchar(max)
+  district nvarchar(100)
+  state nvarchar(100)
+  postal_code nvarchar(15)
+  latitude decimal(10,7)
+  longitude decimal(10,7)
+  status nvarchar(40) [not null, default: 'submitted', note: 'submitted, acknowledged, under_review, assigned, in_progress, awaiting_citizen, resolved, closed, rejected, reopened']
+  priority nvarchar(20) [not null, default: 'medium', note: 'low, medium, high, critical']
+  is_anonymous bit [not null, default: 0, note: 'Controls public display of identity; user_id still identifies the submitter internally']
+  submitted_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  acknowledged_at datetime2
+  resolved_at datetime2
+  closed_at datetime2
+  reopened_at datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    user_id
+    category_id
+    status
+    priority
+    submitted_at
+    (status, priority)
+  }
+}
+
+Table grievance_attachments {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  uploaded_by_user_id bigint [not null]
+  file_name nvarchar(255) [not null]
+  storage_key nvarchar(500) [not null]
+  mime_type nvarchar(120)
+  file_size_bytes bigint
+  checksum nvarchar(128)
+  is_evidence bit [not null, default: 0]
+  uploaded_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+}
+
+Table post_grievance_links {
+  post_id bigint [not null]
+  grievance_id bigint [not null]
+  linked_by_user_id bigint [not null]
+  link_type nvarchar(30) [not null, default: 'discussion', note: 'discussion, official_update, evidence_context']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (post_id, grievance_id) [pk]
+    grievance_id
+    created_at
+  }
+}
+
+// ============================================================
+// 4. AI ASSESSMENTS
+// ============================================================
+
+Table ai_assessments {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  model_name nvarchar(120) [not null]
+  model_version nvarchar(80)
+  predicted_category_id bigint
+  predicted_priority nvarchar(20)
+  sentiment_label nvarchar(40)
+  urgency_score decimal(5,4)
+  confidence_score decimal(5,4)
+  duplicate_of_grievance_id bigint
+  summary nvarchar(max)
+  recommended_department_id bigint
+  recommendation_reason nvarchar(max)
+  human_review_required bit [not null, default: 1]
+  reviewed_by_user_id bigint
+  reviewed_at datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    grievance_id
+    predicted_category_id
+    duplicate_of_grievance_id
+  }
+}
+
+// ============================================================
+// 5. ASSIGNMENTS, STATUS HISTORY AND RESPONSES
+// ============================================================
+
+Table grievance_assignments {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  department_id bigint [not null]
+  assigned_to_user_id bigint
+  assigned_by_user_id bigint
+  assignment_status nvarchar(30) [not null, default: 'assigned', note: 'assigned, accepted, transferred, completed, cancelled']
+  assignment_reason nvarchar(max)
+  assigned_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  accepted_at datetime2
+  completed_at datetime2
+  transfer_from_assignment_id bigint
+
+  indexes {
+    grievance_id
+    department_id
+    assigned_to_user_id
+    assignment_status
+  }
+}
+
+Table grievance_status_history {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  previous_status nvarchar(40)
+  new_status nvarchar(40) [not null]
+  changed_by_user_id bigint
+  change_reason nvarchar(max)
+  is_public bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    grievance_id
+    created_at
+  }
+}
+
+Table grievance_responses {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  assignment_id bigint
+  user_id bigint
+  response_type nvarchar(40) [not null, note: 'acknowledgement, clarification_request, progress_update, resolution, rejection']
+  message nvarchar(max) [not null]
+  is_public bit [not null, default: 1]
+  is_final_response bit [not null, default: 0]
+  related_post_id bigint
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+}
+
+// ============================================================
+// 6. SLA POLICIES, TRACKING AND ESCALATIONS
+// ============================================================
+
+Table sla_policies {
+  id bigint [pk, increment]
+  category_id bigint
+  department_id bigint
+  priority nvarchar(20) [not null]
+  acknowledgement_minutes int [not null]
+  response_minutes int [not null]
+  resolution_minutes int [not null]
+  working_hours_only bit [not null, default: 0]
+  escalation_after_minutes int
+  effective_from datetime2 [not null]
+  effective_until datetime2
+  is_active bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+}
+
+Table grievance_sla {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  sla_policy_id bigint [not null]
+  acknowledgement_due_at datetime2
+  first_response_due_at datetime2
+  resolution_due_at datetime2
+  first_responded_at datetime2
+  actual_resolved_at datetime2
+  clock_status nvarchar(20) [not null, default: 'running', note: 'running, paused, met, breached, stopped']
+  paused_at datetime2
+  total_paused_minutes int [not null, default: 0]
+  breached_at datetime2
+  breach_reason nvarchar(max)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    grievance_id
+    resolution_due_at
+    clock_status
+  }
+}
+
+Table grievance_escalations {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  sla_id bigint
+  from_department_id bigint
+  to_department_id bigint
+  assigned_to_user_id bigint
+  level nvarchar(20) [not null, note: 'level_1, level_2, level_3']
+  reason nvarchar(max) [not null]
+  status nvarchar(20) [not null, default: 'pending', note: 'pending, acknowledged, resolved, dismissed']
+  triggered_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  acknowledged_at datetime2
+  resolved_at datetime2
+  resolution_note nvarchar(max)
+
+  indexes {
+    grievance_id
+    status
+    triggered_at
+  }
+}
+
+// ============================================================
+// 7. NOTIFICATIONS, FEEDBACK AND AUDIT
+// ============================================================
+
+Table notifications {
+  id bigint [pk, increment]
+  recipient_user_id bigint [not null]
+  grievance_id bigint
+  post_id bigint
+  channel nvarchar(20) [not null, note: 'email, sms, in_app, push']
+  status nvarchar(20) [not null, default: 'queued', note: 'queued, sent, delivered, failed']
+  template_key nvarchar(100)
+  subject nvarchar(255)
+  message nvarchar(max) [not null]
+  provider_message_id nvarchar(255)
+  sent_at datetime2
+  delivered_at datetime2
+  read_at datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    recipient_user_id
+    grievance_id
+    post_id
+    status
+    created_at
+  }
+}
+
+Table grievance_feedback {
+  id bigint [pk, increment]
+  grievance_id bigint [not null]
+  user_id bigint [not null]
+  response_id bigint
+  feedback_type nvarchar(40) [not null, note: 'satisfaction, complaint_reopened, appeal']
+  rating int
+  comments nvarchar(max)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    grievance_id
+    user_id
+  }
+}
+
+Table audit_logs {
+  id bigint [pk, increment]
+  grievance_id bigint
+  actor_user_id bigint
+  action nvarchar(120) [not null]
+  entity_type nvarchar(80) [not null]
+  entity_id bigint
+  old_values nvarchar(max) [note: 'JSON payload; validate with ISJSON() in SQL Server']
+  new_values nvarchar(max) [note: 'JSON payload; validate with ISJSON() in SQL Server']
+  ip_address varchar(45)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    grievance_id
+    (entity_type, entity_id)
+    created_at
+  }
+}
+
+// ============================================================
+// 8. FOREIGN KEY RELATIONSHIPS
+// ============================================================
+
+// Organization and access
+Ref: organizations.created_by_user_id > users.id
+Ref: organization_roles.organization_id > organizations.id
+Ref: organization_memberships.organization_id > organizations.id
+Ref: organization_memberships.user_id > users.id
+Ref: organization_memberships.organization_role_id > organization_roles.id
+Ref: departments.organization_id > organizations.id
+Ref: departments.parent_department_id > departments.id
+Ref: department_roles.department_id > departments.id
+Ref: department_memberships.user_id > users.id
+Ref: department_memberships.department_id > departments.id
+Ref: department_memberships.department_role_id > department_roles.id
+Ref: department_memberships.manager_user_id > users.id
+Ref: user_platform_roles.user_id > users.id
+Ref: user_platform_roles.platform_role_id > platform_roles.id
+Ref: user_platform_roles.assigned_by_user_id > users.id
+
+// Social graph and posts
+Ref: user_follows.follower_user_id > users.id
+Ref: user_follows.followed_user_id > users.id
+Ref: posts.author_user_id > users.id
+Ref: posts.reply_to_post_id > posts.id
+Ref: posts.quote_post_id > posts.id
+Ref: post_media.post_id > posts.id
+Ref: post_media.uploaded_by_user_id > users.id
+Ref: post_likes.post_id > posts.id
+Ref: post_likes.user_id > users.id
+Ref: post_reposts.post_id > posts.id
+Ref: post_reposts.user_id > users.id
+Ref: post_reposts.quote_post_id > posts.id
+Ref: post_bookmarks.post_id > posts.id
+Ref: post_bookmarks.user_id > users.id
+Ref: post_comments.post_id > posts.id
+Ref: post_comments.user_id > users.id
+Ref: post_comments.parent_comment_id > post_comments.id
+Ref: comment_likes.comment_id > post_comments.id
+Ref: comment_likes.user_id > users.id
+Ref: post_hashtags.post_id > posts.id
+Ref: post_hashtags.hashtag_id > hashtags.id
+Ref: post_mentions.post_id > posts.id
+Ref: post_mentions.mentioned_user_id > users.id
+Ref: post_views.post_id > posts.id
+Ref: post_views.viewer_user_id > users.id
+
+// Grievances and social links
+Ref: grievance_categories.parent_category_id > grievance_categories.id
+Ref: grievance_categories.default_department_id > departments.id
+Ref: grievances.user_id > users.id
+Ref: grievances.category_id > grievance_categories.id
+Ref: grievance_attachments.grievance_id > grievances.id
+Ref: grievance_attachments.uploaded_by_user_id > users.id
+Ref: post_grievance_links.post_id > posts.id
+Ref: post_grievance_links.grievance_id > grievances.id
+Ref: post_grievance_links.linked_by_user_id > users.id
+
+// AI
+Ref: ai_assessments.grievance_id > grievances.id
+Ref: ai_assessments.predicted_category_id > grievance_categories.id
+Ref: ai_assessments.duplicate_of_grievance_id > grievances.id
+Ref: ai_assessments.recommended_department_id > departments.id
+Ref: ai_assessments.reviewed_by_user_id > users.id
+
+// Workflow
+Ref: grievance_assignments.grievance_id > grievances.id
+Ref: grievance_assignments.department_id > departments.id
+Ref: grievance_assignments.assigned_to_user_id > users.id
+Ref: grievance_assignments.assigned_by_user_id > users.id
+Ref: grievance_assignments.transfer_from_assignment_id > grievance_assignments.id
+Ref: grievance_status_history.grievance_id > grievances.id
+Ref: grievance_status_history.changed_by_user_id > users.id
+Ref: grievance_responses.grievance_id > grievances.id
+Ref: grievance_responses.assignment_id > grievance_assignments.id
+Ref: grievance_responses.user_id > users.id
+Ref: grievance_responses.related_post_id > posts.id
+
+// SLA and escalation
+Ref: sla_policies.category_id > grievance_categories.id
+Ref: sla_policies.department_id > departments.id
+Ref: grievance_sla.grievance_id > grievances.id
+Ref: grievance_sla.sla_policy_id > sla_policies.id
+Ref: grievance_escalations.grievance_id > grievances.id
+Ref: grievance_escalations.sla_id > grievance_sla.id
+Ref: grievance_escalations.from_department_id > departments.id
+Ref: grievance_escalations.to_department_id > departments.id
+Ref: grievance_escalations.assigned_to_user_id > users.id
+
+// Notifications, feedback, audit
+Ref: notifications.recipient_user_id > users.id
+Ref: notifications.grievance_id > grievances.id
+Ref: notifications.post_id > posts.id
+Ref: grievance_feedback.grievance_id > grievances.id
+Ref: grievance_feedback.user_id > users.id
+Ref: grievance_feedback.response_id > grievance_responses.id
+Ref: audit_logs.grievance_id > grievances.id
+Ref: audit_logs.actor_user_id > users.id
+
+
+// ============================================================
+// IMPLEMENTATION NOTES FOR ANONYMOUS POST LOOKUP
+// ============================================================
+// - Create the post and its public_post_id in one transaction.
+// - Generate public_post_id using a cryptographically secure random value; do not use
+//   a sequential database ID as the public lookup identifier.
+// - Anonymous post lookup must return only fields allowed for public viewing.
+// - Generate TXT/PDF receipts on demand from the stored post; persist them only if
+//   you need downloadable receipt history. Do not include internal user IDs or private metadata.
+// - For registered posts, display the post in the author's profile when is_anonymous = 0.
+// - For guest posts, author_user_id is NULL and is_anonymous = 1; the post remains searchable
+//   by public_post_id subject to moderation and visibility rules.
+// - A public lookup ID is not an authorization secret. If guests must later edit/delete a post,
+//   issue a separate high-entropy secret and store only its hash.
+// - Seed organization_roles for each organization with appropriate roles such as owner,
+//   organization_admin, director, ceo and md. Assign permissions explicitly; titles alone
+//   must not grant privileges.
+// - Enforce that a department_role belongs to the same department referenced by the membership.
+//   Also validate that manager_user_id belongs to a compatible organization/department scope.
+// ============================================================
+// 9. JOBS, RECRUITMENT, GOVERNMENT VACANCIES AND RECEIPT AUDITING
+// ============================================================
+// Design notes:
+// - job_postings is the shared listing table for government, private, individual-employer,
+//   NGO and other jobs.
+// - Exactly one employer owner is required: organization_id OR employer_user_id.
+// - government_job_details contains government-vacancy-specific fields only.
+// - job_receipts records each incoming receipt event and its source organization.
+// - job_applications records platform-known applications; external/offline applications
+//   require candidate or trusted-source confirmation and must not be assumed submitted.
+// - job_application_decisions stores candidate-visible decisions separately from private notes.
+// - government_application_results stores stage-wise government recruitment results.
+// - Use audit_logs for lifecycle changes and decision/result changes.
+// - Store resumes and other files in protected storage; save only storage keys here.
+// - Enforce candidate ownership and candidate-visible publication rules in backend logic.
+// - Existing job_postings rows must be migrated before organization_id is made nullable.
+//   Add the employer XOR CHECK constraint only after existing rows satisfy the rule.
+
+Table job_postings {
+  id bigint [pk, increment]
+  public_job_id nvarchar(40) [not null, unique, note: 'Generate securely in the application; do not expose sequential id as public identifier']
+  job_type nvarchar(30) [not null, note: 'government, private, individual, ngo, other']
+  organization_id bigint [note: 'Employer organization; NULL for an individual employer']
+  employer_user_id bigint [note: 'Individual employer user; NULL for organization employers']
+  posted_by_user_id bigint [not null, note: 'User who created the listing; may differ from employer']
+  title nvarchar(250) [not null]
+  description nvarchar(max) [not null]
+  employment_type nvarchar(30) [note: 'full_time, part_time, contract, internship, temporary']
+  experience_level nvarchar(30)
+  workplace_type nvarchar(20) [note: 'onsite, hybrid, remote']
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  salary_min decimal(18,2)
+  salary_max decimal(18,2)
+  salary_currency nvarchar(3)
+  salary_period nvarchar(20) [note: 'hourly, monthly, yearly']
+  application_method nvarchar(30) [not null, default: 'platform', note: 'platform, external_url, email, offline']
+  application_url nvarchar(1000)
+  application_email nvarchar(255)
+  status nvarchar(30) [not null, default: 'draft', note: 'draft, pending_review, published, paused, closed, rejected, archived']
+  published_at datetime2
+  application_deadline datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+  deleted_at datetime2
+
+  indexes {
+    (job_type, status, published_at)
+    organization_id
+    posted_by_user_id
+    application_deadline
+    created_at
+  }
+}
+
+Table government_job_details {
+  job_id bigint [pk, note: 'One-to-one extension of job_postings for government vacancy fields']
+  recruitment_name nvarchar(250)
+  advertisement_number nvarchar(100)
+  department_name nvarchar(200)
+  post_name nvarchar(200)
+  number_of_vacancies int
+  eligibility_criteria nvarchar(max)
+  minimum_age int
+  maximum_age int
+  educational_qualification nvarchar(max)
+  application_start_at datetime2
+  application_end_at datetime2
+  examination_date datetime2
+  official_notification_url nvarchar(1000)
+  official_application_url nvarchar(1000)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+}
+
+Table job_receipts {
+  id bigint [pk, increment]
+  job_posting_id bigint [not null]
+  source_organization_id bigint [not null, note: 'Organization that supplied the job information; may differ from the employer']
+  received_by_user_id bigint
+  received_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  source_reference nvarchar(200)
+  source_url nvarchar(1000)
+  receipt_batch_id nvarchar(100)
+  receipt_method nvarchar(30) [note: 'manual, email, api, import, other']
+  verification_status nvarchar(20) [not null, default: 'pending', note: 'pending, verified, rejected']
+  verification_notes nvarchar(max)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    job_posting_id
+    source_organization_id
+    received_at
+    (source_organization_id, received_at)
+    (verification_status, received_at)
+  }
+}
+
+Table candidate_profiles {
+  user_id bigint [pk]
+  headline nvarchar(250)
+  professional_summary nvarchar(max)
+  current_job_title nvarchar(150)
+  total_experience_months int
+  current_city nvarchar(100)
+  current_state nvarchar(100)
+  resume_storage_key nvarchar(500)
+  portfolio_url nvarchar(1000)
+  linkedin_url nvarchar(1000)
+  profile_visibility nvarchar(20) [not null, default: 'private', note: 'private, employers, public']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+}
+
+Table job_applications {
+  id bigint [pk, increment]
+  job_posting_id bigint [not null]
+  applicant_user_id bigint [not null]
+  resume_storage_key nvarchar(500)
+  cover_letter nvarchar(max)
+  application_method nvarchar(30) [not null, default: 'platform', note: 'platform, external_url, email, offline']
+  external_application_reference nvarchar(200)
+  submission_status nvarchar(30) [not null, default: 'recorded', note: 'recorded, submitted, acknowledged, failed, unverified']
+  submission_reference nvarchar(200)
+  submission_confirmed_at datetime2
+  status_source nvarchar(30) [not null, default: 'platform', note: 'platform, employer, government_portal, manual, imported']
+  last_status_verified_at datetime2
+  status nvarchar(30) [not null, default: 'submitted', note: 'submitted, under_review, shortlisted, interview, offered, hired, rejected, withdrawn']
+  applied_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  withdrawn_at datetime2
+  updated_at datetime2
+
+  indexes {
+    (job_posting_id, applicant_user_id) [unique]
+    applicant_user_id
+    (job_posting_id, status)
+    applied_at
+  }
+}
+
+Table job_application_status_history {
+  id bigint [pk, increment]
+  application_id bigint [not null]
+  previous_status nvarchar(30)
+  new_status nvarchar(30) [not null]
+  changed_by_user_id bigint
+  change_reason nvarchar(max) [note: 'General transition reason; do not put confidential notes here']
+  reason_code nvarchar(50) [note: 'e.g. eligibility, qualifications, experience, incomplete_documents, exam_score, position_filled, other']
+  candidate_visible_reason nvarchar(max)
+  internal_notes nvarchar(max) [note: 'Confidential; never expose to candidates']
+  status_source nvarchar(30) [not null, default: 'platform', note: 'platform, employer, government_portal, manual, imported']
+  is_candidate_visible bit [not null, default: 1]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    application_id
+    created_at
+  }
+}
+
+// Candidate-facing decisions are separate from the current application status.
+// Publish only verified/authorized decisions; keep internal notes private.
+Table job_application_decisions {
+  id bigint [pk, increment]
+  application_id bigint [not null]
+  decision_type nvarchar(30) [not null, note: 'selected, not_selected, waitlisted, conditional_offer, offer, hired, cancelled, pending']
+  reason_code nvarchar(50)
+  candidate_message nvarchar(max) [note: 'Explanation safe to show to the candidate']
+  internal_notes nvarchar(max) [note: 'Confidential recruiter notes; never expose to candidates']
+  decided_by_user_id bigint
+  decision_source nvarchar(30) [not null, default: 'manual', note: 'employer, government_portal, manual, imported']
+  is_official bit [not null, default: 0]
+  is_final bit [not null, default: 0]
+  decision_reference nvarchar(200)
+  decision_at datetime2
+  published_at datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    application_id
+    (application_id, decision_at)
+    (decision_type, is_final)
+  }
+}
+
+// Stage-wise results for government recruitment. Only record official/verified
+// marks, ranks and outcomes when provided by a trusted source.
+Table government_application_results {
+  id bigint [pk, increment]
+  application_id bigint [not null]
+  recruitment_stage nvarchar(50) [not null, note: 'application_screening, written_exam, prelims, mains, interview, skill_test, document_verification, merit_list, waiting_list, final_selection']
+  result_status nvarchar(30) [not null, note: 'pending, qualified, not_qualified, selected, not_selected, waitlisted, absent, disqualified']
+  marks_obtained decimal(10,2)
+  maximum_marks decimal(10,2)
+  rank_number int
+  roll_number nvarchar(100)
+  result_reference nvarchar(200)
+  official_result_url nvarchar(1000)
+  result_document_storage_key nvarchar(500)
+  candidate_message nvarchar(max)
+  is_official bit [not null, default: 0]
+  result_date datetime2
+  published_at datetime2
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    application_id
+    (application_id, recruitment_stage)
+    result_status
+  }
+}
+
+// Optional: track that a candidate acknowledged a published decision.
+Table job_decision_acknowledgements {
+  decision_id bigint [not null]
+  user_id bigint [not null]
+  acknowledged_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (decision_id, user_id) [pk]
+  }
+}
+
+Table saved_jobs {
+  user_id bigint [not null]
+  job_posting_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (user_id, job_posting_id) [pk]
+    job_posting_id
+    created_at
+  }
+}
+
+// Job module foreign keys
+Ref: job_postings.organization_id > organizations.id
+Ref: job_postings.employer_user_id > users.id
+Ref: job_postings.posted_by_user_id > users.id
+Ref: government_job_details.job_id > job_postings.id
+Ref: job_receipts.job_posting_id > job_postings.id
+Ref: job_receipts.source_organization_id > organizations.id
+Ref: job_receipts.received_by_user_id > users.id
+Ref: candidate_profiles.user_id > users.id
+Ref: job_applications.job_posting_id > job_postings.id
+Ref: job_applications.applicant_user_id > users.id
+Ref: job_application_status_history.application_id > job_applications.id
+Ref: job_application_status_history.changed_by_user_id > users.id
+Ref: job_application_decisions.application_id > job_applications.id
+Ref: job_application_decisions.decided_by_user_id > users.id
+Ref: government_application_results.application_id > job_applications.id
+Ref: job_decision_acknowledgements.decision_id > job_application_decisions.id
+Ref: job_decision_acknowledgements.user_id > users.id
+Ref: saved_jobs.user_id > users.id
+Ref: saved_jobs.job_posting_id > job_postings.id
+
+// Audit conventions for existing audit_logs (no new audit table required):
+// entity_type values: job_posting, government_job_details, job_receipt,
+// job_application, job_application_status_history, job_application_decision,
+// government_application_result.
+// Example actions: created, updated, published, paused, closed, archived,
+// receipt_recorded, receipt_verified, receipt_rejected, application_status_changed,
+// decision_created, decision_published, decision_revised, result_imported, result_published.
+// Record actor_user_id, entity_id, old_values, new_values and created_at.
+// Keep receipt events immutable; a new receipt/update should create a new job_receipts row.
+
+// SQL Server migration guidance (review existing data before applying):
+// 1. Add employer_user_id as nullable.
+// 2. Alter job_postings.organization_id to allow NULL.
+// 3. Add FK job_postings.employer_user_id -> users.id.
+// 4. Add CHECK constraint requiring exactly one of organization_id/employer_user_id.
+// 5. Backfill new application/history fields with safe defaults as needed.
+// 6. Create the new decision, government-result and acknowledgement tables.
+// Do not apply a CHECK constraint until existing job_postings rows meet the rule.
+// Example XOR rule:
+// CHECK ((organization_id IS NOT NULL AND employer_user_id IS NULL)
+//     OR (organization_id IS NULL AND employer_user_id IS NOT NULL))
