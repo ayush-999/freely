@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { Link, useNavigate } from "react-router-dom"
-import { AtSign, Eye, EyeOff, Loader2 } from "lucide-react"
+import { AtSign, Eye, EyeOff, Loader2, UserPlus } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
+import { toast } from "@workspace/ui/components/toast"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -130,6 +131,7 @@ export function RegisterPage() {
         ...(values.email ? { email: values.email } : {}),
       })
       navigate(APP_ROUTES.login, { replace: true })
+      toast.add({ title: "Account created successfully.", type: "success" })
     } catch (registerError) {
       setError(getApiErrorMessage(registerError, "Registration failed"))
     }
@@ -291,6 +293,7 @@ export function RegisterPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="animate-spin" />}
+            {!isSubmitting && <UserPlus className="size-4" />}
             {isSubmitting ? "Creating account…" : "Create account"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">

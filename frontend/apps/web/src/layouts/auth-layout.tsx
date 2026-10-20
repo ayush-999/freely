@@ -1,6 +1,7 @@
 import { Link, Outlet } from "react-router-dom"
 
 import { APP_ROUTES } from "@workspace/constants"
+import { FreelyLogo } from "@workspace/ui/components/freely-logo"
 
 import { ModeToggle } from "@/components/mode-toggle"
 
@@ -11,8 +12,8 @@ export function AuthLayout() {
       <div className="absolute top-4 right-4">
         <ModeToggle />
       </div>
-      <Link to={APP_ROUTES.home} className="text-xl font-semibold">
-        Freely
+      <Link to={APP_ROUTES.home}>
+        <FreelyLogo />
       </Link>
       <div className="w-full max-w-sm">
         <Outlet />

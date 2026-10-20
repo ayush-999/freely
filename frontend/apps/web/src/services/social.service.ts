@@ -72,6 +72,14 @@ export const socialService = {
     return response.data
   },
 
+  async getComments(postId: number, params?: ListParams): Promise<Comment[]> {
+    const response = await api.get<Comment[]>(
+      API_ENDPOINTS.social.comments(postId),
+      { params }
+    )
+    return response.data
+  },
+
   async toggleFollow(userId: number): Promise<MessageResponse> {
     const response = await api.post<MessageResponse>(
       API_ENDPOINTS.social.follow(userId)

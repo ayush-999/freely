@@ -53,7 +53,6 @@ export function ProfilePage() {
         website_url: values.website_url || undefined,
         preferred_language: values.preferred_language || undefined,
       })
-      setMessage("Profile updated.")
     } catch (updateError) {
       setMessage(
         typeof updateError === "string"

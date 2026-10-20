@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
-import { Eye, EyeOff, Loader2, AtSign, Mail } from "lucide-react"
+import { AtSign, Eye, EyeOff, Loader2, LogIn, Mail } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
+import { toast } from "@workspace/ui/components/toast"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -49,6 +50,7 @@ export function LoginPage() {
       await login(values.handle, values.password)
       const from = (location.state as { from?: string } | null)?.from
       navigate(from ?? APP_ROUTES.feed, { replace: true })
+      toast.add({ title: "Welcome back!", type: "success" })
     } catch (loginError) {
       const message =
         typeof loginError === "string" ? loginError : "Login failed"
@@ -135,6 +137,7 @@ export function LoginPage() {
           {formError && <p className="text-sm text-destructive">{formError}</p>}
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="animate-spin" />}
+            {!isSubmitting && <LogIn className="size-4" />}
             {isSubmitting ? "Logging in…" : "Log in"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">

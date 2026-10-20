@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useForm } from "react-hook-form"
+import { Loader2, Search } from "lucide-react"
 
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
@@ -81,6 +82,11 @@ export function TrackGrievancePage() {
               disabled={isSubmitting}
               className="self-start"
             >
+              {isSubmitting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Search className="size-4" />
+              )}
               {isSubmitting ? "Searching…" : "Track"}
             </Button>
           </form>

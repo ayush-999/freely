@@ -56,6 +56,21 @@ def feed(
     return SocialService(db).feed(current, limit, offset)
 
 
+@router.get(
+    "/posts/{post_id}/comments",
+    response_model=list[CommentResponse],
+    summary="List visible comments on a viewable post",
+)
+def list_comments(
+    post_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current: Optional[User] = Depends(get_optional_user),
+):
+    return SocialService(db).comments_for_post(current, post_id, limit, offset)
+
+
 @router.delete("/posts/{post_id}", response_model=MessageResponse, summary="Soft delete a post")
 def delete_post(
     post_id: int,

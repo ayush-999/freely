@@ -35,6 +35,9 @@ export interface Post {
   visibility: string
   moderation_status: string
   created_at: string
+  like_count: number
+  comment_count: number
+  is_liked: boolean
 }
 
 export interface PostPublicView {
@@ -54,6 +57,8 @@ export interface Comment {
   id: number
   post_id: number
   user_id: number
+  user_handle: string
+  full_name: string
   parent_comment_id: number | null
   body: string
   moderation_status: string

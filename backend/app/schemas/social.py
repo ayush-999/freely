@@ -45,6 +45,9 @@ class PostResponse(ORMModel):
     visibility: str
     moderation_status: str
     created_at: datetime
+    like_count: int = 0
+    comment_count: int = 0
+    is_liked: bool = False
 
 
 class PostPublicView(BaseModel):
@@ -66,6 +69,8 @@ class CommentResponse(ORMModel):
     id: int
     post_id: int
     user_id: int
+    user_handle: str
+    full_name: str
     parent_comment_id: Optional[int] = None
     body: str
     moderation_status: str

@@ -111,8 +111,30 @@ class SocialService(BaseService):
             raise NotFoundError("Post not found")
         return post
 
-    def feed(self, viewer: Optional[User], limit: int, offset: int) -> list[Post]:
-        return self.posts.list_feed(None if viewer is None else viewer.id, limit, offset)
+    def feed(
+        self, viewer: Optional[User], limit: int, offset: int
+    ) -> list[dict]:
+        viewer_id = None if viewer is None else viewer.id
+        posts = self.posts.list_feed(viewer_id, limit, offset)
+        engagement = self.posts.engagement_for_posts(
+            [post.id for post in posts], viewer_id
+        )
+        return [
+            {
+                **post.__dict__,
+                **engagement[post.id],
+            }
+            for post in posts
+        ]
+
+    def comments_for_post(
+        self, viewer: Optional[User], post_id: int, limit: int, offset: int
+    ) -> list[dict[str, object]]:
+        viewer_id = None if viewer is None else viewer.id
+        post = self.posts.get_viewable(post_id, viewer_id)
+        if post is None:
+            raise NotFoundError("Post not found")
+        return self.comments.list_for_post(post.id, limit, offset)
 
     def delete_post(self, actor: User, post_id: int) -> None:
         post = self.posts.get_or_404(post_id)
@@ -162,7 +184,9 @@ class SocialService(BaseService):
             )
         self.db.commit()
 
-    def comment(self, user: User, post_id: int, data: CommentCreateRequest) -> PostComment:
+    def comment(
+        self, user: User, post_id: int, data: CommentCreateRequest
+    ) -> dict[str, object]:
         post = self.posts.get_or_404(post_id)
         comment = PostComment(
             post_id=post.id, user_id=user.id,
@@ -175,7 +199,11 @@ class SocialService(BaseService):
                         template_key="comment", post_id=post.id)
         self.db.commit()
         self.db.refresh(comment)
-        return comment
+        return {
+            **comment.__dict__,
+            "user_handle": user.user_handle,
+            "full_name": user.full_name,
+        }
 
     # ---------------------------------------------------------------- follows
     def toggle_follow(self, user: User, target_user_id: int) -> bool:

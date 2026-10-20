@@ -1,8 +1,10 @@
 import { useState } from "react"
 import { useForm } from "react-hook-form"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
+import { Sparkles } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
+import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -32,19 +34,41 @@ type GrievanceFormValues = {
   is_anonymous: boolean
 }
 
+interface LocationDraftState {
+  title?: string
+  description?: string
+  priority?: Priority
+  is_anonymous?: boolean
+}
+
 export function SubmitGrievancePage() {
+  const location = useLocation()
+  const storedDraftRaw =
+    typeof window !== "undefined"
+      ? sessionStorage.getItem("freely_grievance_draft")
+      : null
+  let storedDraft: LocationDraftState | null = null
+  if (storedDraftRaw) {
+    try {
+      storedDraft = JSON.parse(storedDraftRaw) as LocationDraftState
+    } catch {
+      storedDraft = null
+    }
+  }
+  const draftState = (location.state as LocationDraftState) || storedDraft || null
+
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<GrievanceFormValues>({
     defaultValues: {
-      title: "",
-      description: "",
-      priority: "medium",
+      title: draftState?.title || "",
+      description: draftState?.description || "",
+      priority: draftState?.priority || "medium",
       district: "",
       state: "",
-      is_anonymous: false,
+      is_anonymous: draftState?.is_anonymous ?? false,
     },
   })
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +87,7 @@ export function SubmitGrievancePage() {
         ...(values.state ? { state: values.state } : {}),
       })
       setCreated(grievance)
+      sessionStorage.removeItem("freely_grievance_draft")
     } catch (submitError) {
       setError(getApiErrorMessage(submitError, "Could not submit grievance"))
     }
@@ -103,6 +128,17 @@ export function SubmitGrievancePage() {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {draftState?.description && (
+          <div className="mb-4 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-foreground animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary shrink-0" />
+              <span>Pre-filled from Freely AI Voice Studio</span>
+            </div>
+            <Badge variant="outline" className="border-primary/30 text-primary text-[10px]">
+              AI Voice Draft
+            </Badge>
+          </div>
+        )}
         <form
           onSubmit={handleSubmit(onSubmit)}
           className="flex flex-col gap-4"

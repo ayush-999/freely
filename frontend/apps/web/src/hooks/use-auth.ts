@@ -1,4 +1,5 @@
 import { login, logout, updateProfile } from "@/store/auth-slice"
+import { toast } from "@workspace/ui/components/toast"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import type { UserUpdateRequest } from "@/types"
 
@@ -14,7 +15,10 @@ export function useAuth() {
     isAuthenticated: status === "authenticated",
     login: (username: string, password: string) =>
       dispatch(login({ username, password })).unwrap(),
-    logout: () => dispatch(logout()),
+    logout: () => {
+      dispatch(logout())
+      toast.add({ title: "You have been logged out.", type: "success" })
+    },
     updateProfile: (data: UserUpdateRequest) =>
       dispatch(updateProfile(data)).unwrap(),
   }

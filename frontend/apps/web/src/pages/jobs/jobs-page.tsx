@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { Link } from "react-router-dom"
+import { Search } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
 import { Badge } from "@workspace/ui/components/badge"
@@ -85,6 +86,7 @@ export function JobsPage() {
           <option value="other">Other</option>
         </select>
         <Button type="submit" variant="outline">
+          <Search className="size-4" />
           Search
         </Button>
       </form>
