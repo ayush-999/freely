@@ -31,7 +31,7 @@ import { config } from "@/config/config"
 const FEATURES = [
   {
     icon: MessageSquare,
-    title: "Social feed",
+    title: "Community posts",
     description:
       "Share updates with your network. Post publicly, to followers, your department, or privately — you control the audience.",
   },
@@ -78,7 +78,7 @@ const STEPS = [
     step: "02",
     title: "Post, report, apply",
     description:
-      "Share on the feed, file a grievance with a public tracking ID, or apply for a job.",
+      "Share a post, file a grievance with a public tracking ID, or apply for a job.",
   },
   {
     step: "03",
@@ -118,7 +118,7 @@ export function LandingPage() {
           </Button>
 
           <Button size="lg" variant="outline" asChild>
-            <Link to={APP_ROUTES.feed}>Explore the feed</Link>
+            <Link to={APP_ROUTES.home}>Explore Home</Link>
           </Button>
         </div>
       </section>

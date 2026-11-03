@@ -11,6 +11,7 @@ import {
 import { formatDateTime, getApiErrorMessage } from "@workspace/utils"
 
 import { LoadingFallback } from "@/components/loading-fallback"
+import { RichText } from "@/components/rich-text"
 import { socialService } from "@/services/social.service"
 import type { PostPublicView } from "@/types"
 
@@ -56,7 +57,9 @@ export function PostLookupPage() {
         <CardDescription>{formatDateTime(post.created_at)}</CardDescription>
       </CardHeader>
       <CardContent>
-        <p className="text-sm whitespace-pre-wrap">{post.body}</p>
+        <p className="text-sm whitespace-pre-wrap">
+          <RichText>{post.body}</RichText>
+        </p>
       </CardContent>
     </Card>
   )

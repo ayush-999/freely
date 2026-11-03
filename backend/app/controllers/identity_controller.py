@@ -1,6 +1,6 @@
 """Identity controller: registration, login, profiles, platform roles (LLD §1.3)."""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -56,6 +56,72 @@ def update_me(
     current: User = Depends(get_current_user),
 ):
     return IdentityService(db).update_me(current, data)
+
+
+@router.post(
+    "/users/me/avatar",
+    response_model=UserMeResponse,
+    summary="Upload profile photo / avatar",
+)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    content = await file.read()
+    return IdentityService(db).upload_avatar(current, file.filename or "avatar.jpg", content)
+
+
+@router.delete(
+    "/users/me/avatar",
+    response_model=UserMeResponse,
+    summary="Remove profile photo / avatar",
+)
+def delete_avatar(
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    return IdentityService(db).delete_avatar(current)
+
+
+@router.post(
+    "/users/me/cover",
+    response_model=UserMeResponse,
+    summary="Upload cover photo",
+)
+async def upload_cover(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    content = await file.read()
+    return IdentityService(db).upload_cover(current, file.filename or "cover.jpg", content)
+
+
+@router.delete(
+    "/users/me/cover",
+    response_model=UserMeResponse,
+    summary="Remove cover photo",
+)
+def delete_cover(
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    return IdentityService(db).delete_cover(current)
+
+
+# NOTE: must stay above /users/{handle} so the literal path wins routing.
+@router.get(
+    "/users/search",
+    response_model=list[UserPublicResponse],
+    summary="Search people by handle or name",
+)
+def search_users(
+    q: str = Query(min_length=1, max_length=100),
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    return IdentityService(db).search_users(q, limit)
 
 
 # NOTE: must stay above /users/{handle} so the literal path wins routing.

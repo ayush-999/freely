@@ -1,4 +1,4 @@
-import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
+import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 
 import { tokenStorage } from "@workspace/auth"
 import { getApiErrorMessage } from "@workspace/utils"
@@ -72,6 +72,10 @@ const authSlice = createSlice({
   name: "auth",
   initialState,
   reducers: {
+    setUser(state, action: PayloadAction<UserMe>) {
+      state.user = action.payload
+      state.status = "authenticated"
+    },
     logout(state) {
       tokenStorage.clear()
       state.user = null
@@ -116,5 +120,5 @@ const authSlice = createSlice({
   },
 })
 
-export const { logout } = authSlice.actions
+export const { logout, setUser } = authSlice.actions
 export const authReducer = authSlice.reducer

@@ -1,10 +1,11 @@
 /** Client-side route paths shared by every app in the monorepo. */
 export const APP_ROUTES = {
-  home: "/",
-  feed: "/feed",
+  landing: "/",
+  home: "/home",
   login: "/login",
   register: "/register",
-  track: "/track",
+  track: "/search?tab=grievances",
+  search: "/search",
   grievances: {
     mine: "/grievances",
     new: "/grievances/new",
@@ -15,8 +16,12 @@ export const APP_ROUTES = {
     detail: (publicJobId: string) => `/jobs/${publicJobId}`,
   },
   notifications: "/notifications",
+  saved: "/saved",
+  comingSoon: (feature: string) =>
+    `/coming-soon?feature=${encodeURIComponent(feature)}`,
   profile: "/profile",
   organization: (slug: string) => `/organizations/${slug}`,
   user: (handle: string) => `/u/${handle}`,
+  hashtag: (tag: string) => `/home?hashtag=${encodeURIComponent(tag)}`,
   post: (publicPostId: string) => `/posts/${publicPostId}`,
 } as const

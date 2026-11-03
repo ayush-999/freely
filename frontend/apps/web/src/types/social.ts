@@ -6,6 +6,9 @@ export type RepostType = "repost" | "quote"
 export type ModerationStatus = "visible" | "hidden" | "removed" | "under_review"
 
 export interface MediaIn {
+  id?: number
+  post_id?: number
+  uploaded_by_user_id?: number | null
   file_name: string
   storage_key: string
   mime_type?: string
@@ -13,6 +16,7 @@ export interface MediaIn {
   alt_text?: string
   media_type: MediaType
   sort_order?: number
+  created_at?: string
 }
 
 export interface PostCreateRequest {
@@ -35,9 +39,42 @@ export interface Post {
   visibility: string
   moderation_status: string
   created_at: string
+  edited_at?: string | null
   like_count: number
   comment_count: number
+  repost_count: number
   is_liked: boolean
+  is_reposted: boolean
+  is_bookmarked: boolean
+  author_handle?: string | null
+  author_full_name?: string | null
+  author_avatar_storage_key?: string | null
+  media?: MediaIn[]
+}
+
+/** A post on a profile feed; set `reposted_by_handle` when it is a repost. */
+export interface ProfilePost extends Post {
+  activity_at: string
+  reposted_by_handle: string | null
+  reposted_by_full_name: string | null
+}
+
+/** A saved post; `collection_ids` lists the collections it is filed in. */
+export interface SavedPost extends Post {
+  saved_at: string
+  collection_ids: number[]
+}
+
+export interface BookmarkCollection {
+  id: number
+  name: string
+  created_at: string
+  post_count: number
+}
+
+export interface TrendingHashtag {
+  tag: string
+  post_count: number
 }
 
 export interface PostPublicView {
@@ -46,6 +83,7 @@ export interface PostPublicView {
   post_type: string
   is_sensitive: boolean
   created_at: string
+  media?: MediaIn[]
 }
 
 export interface CommentCreateRequest {
@@ -63,6 +101,11 @@ export interface Comment {
   body: string
   moderation_status: string
   created_at: string
+  updated_at: string | null
+  like_count: number
+  is_liked: boolean
+  can_edit: boolean
+  can_delete: boolean
 }
 
 export interface RepostRequest {

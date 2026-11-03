@@ -12,7 +12,7 @@ export function AuthLayout() {
       <div className="absolute top-4 right-4">
         <ModeToggle />
       </div>
-      <Link to={APP_ROUTES.home}>
+      <Link to={APP_ROUTES.landing}>
         <FreelyLogo />
       </Link>
       <div className="w-full max-w-sm">

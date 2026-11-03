@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -105,6 +106,7 @@ class Post(Base):
         DATETIME2, nullable=False, server_default=text("SYSUTCDATETIME()")
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(DATETIME2)
+    edited_at: Mapped[Optional[datetime]] = mapped_column(DATETIME2)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DATETIME2)
 
 
@@ -188,6 +190,43 @@ class PostBookmark(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id"), primary_key=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DATETIME2, nullable=False, server_default=text("SYSUTCDATETIME()")
+    )
+
+
+class BookmarkCollection(Base):
+    __tablename__ = "bookmark_collections"
+    __table_args__ = (
+        Index("UQ_bookmark_collections_user_name", "user_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DATETIME2, nullable=False, server_default=text("SYSUTCDATETIME()")
+    )
+
+
+class BookmarkCollectionPost(Base):
+    __tablename__ = "bookmark_collection_posts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["post_id", "user_id"],
+            ["post_bookmarks.post_id", "post_bookmarks.user_id"],
+            name="FK_bookmark_collection_posts_bookmark",
+        ),
+        Index("IX_bookmark_collection_posts_bookmark", "post_id", "user_id"),
+    )
+
+    collection_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("bookmark_collections.id"), primary_key=True
+    )
+    post_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DATETIME2, nullable=False, server_default=text("SYSUTCDATETIME()")
     )

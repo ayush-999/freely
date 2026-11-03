@@ -15,6 +15,8 @@ from app.models.organization import (
     OrganizationRole,
 )
 from app.models.social import (
+    BookmarkCollection,
+    BookmarkCollectionPost,
     CommentLike,
     Hashtag,
     Post,
@@ -65,6 +67,7 @@ __all__ = [
     # social
     "UserFollow", "Post", "PostMedia", "PostLike", "PostRepost", "PostBookmark",
     "PostComment", "CommentLike", "Hashtag", "PostHashtag", "PostMention", "PostView",
+    "BookmarkCollection", "BookmarkCollectionPost",
     # grievance
     "GrievanceCategory", "Grievance", "GrievanceAttachment", "PostGrievanceLink",
     # ai

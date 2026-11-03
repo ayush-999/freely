@@ -10,7 +10,7 @@ interface FooterProps {
 
 export function Footer({ apiOk, onOpenTelemetry }: FooterProps) {
   return (
-    <footer className="border-t bg-white dark:bg-background py-4 transition-colors">
+    <footer className="border-t bg-white py-4 transition-colors dark:bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5">

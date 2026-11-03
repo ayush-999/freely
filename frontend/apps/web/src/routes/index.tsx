@@ -5,6 +5,7 @@ import { APP_ROUTES } from "@workspace/constants"
 
 import { LoadingFallback } from "@/components/loading-fallback"
 import { ProtectedRoute } from "@/components/protected-route"
+import { GuestOnlyRoute } from "@/components/guest-only-route"
 import { AuthLayout } from "@/layouts/auth-layout"
 import { RootLayout } from "@/layouts/root-layout"
 
@@ -17,9 +18,9 @@ const LandingPage = lazy(() =>
     default: module.LandingPage,
   }))
 )
-const FeedPage = lazy(() =>
-  import("@/pages/feed/feed-page").then((module) => ({
-    default: module.FeedPage,
+const HomePage = lazy(() =>
+  import("@/pages/home/home-page").then((module) => ({
+    default: module.HomePage,
   }))
 )
 const LoginPage = lazy(() =>
@@ -32,9 +33,9 @@ const RegisterPage = lazy(() =>
     default: module.RegisterPage,
   }))
 )
-const TrackGrievancePage = lazy(() =>
-  import("@/pages/grievances/track-grievance-page").then((module) => ({
-    default: module.TrackGrievancePage,
+const SearchPage = lazy(() =>
+  import("@/pages/search/search-page").then((module) => ({
+    default: module.SearchPage,
   }))
 )
 const MyGrievancesPage = lazy(() =>
@@ -67,6 +68,11 @@ const NotificationsPage = lazy(() =>
     default: module.NotificationsPage,
   }))
 )
+const SavedPage = lazy(() =>
+  import("@/pages/saved/saved-page").then((module) => ({
+    default: module.SavedPage,
+  }))
+)
 const ProfilePage = lazy(() =>
   import("@/pages/profile/profile-page").then((module) => ({
     default: module.ProfilePage,
@@ -87,6 +93,11 @@ const PostLookupPage = lazy(() =>
     default: module.PostLookupPage,
   }))
 )
+const ComingSoonPage = lazy(() =>
+  import("@/pages/coming-soon-page").then((module) => ({
+    default: module.ComingSoonPage,
+  }))
+)
 const NotFoundPage = lazy(() =>
   import("@/pages/not-found-page").then((module) => ({
     default: module.NotFoundPage,
@@ -103,14 +114,19 @@ function protectedPage(element: ReactNode) {
   return withSuspense(<ProtectedRoute>{element}</ProtectedRoute>)
 }
 
+/** Wrap a page that should only be available to unauthenticated visitors. */
+function guestPage(element: ReactNode) {
+  return withSuspense(<GuestOnlyRoute>{element}</GuestOnlyRoute>)
+}
+
 export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
       // Public routes
-      { path: APP_ROUTES.home, element: withSuspense(<LandingPage />) },
-      { path: APP_ROUTES.feed, element: withSuspense(<FeedPage />) },
-      { path: APP_ROUTES.track, element: withSuspense(<TrackGrievancePage />) },
+      { path: APP_ROUTES.landing, element: guestPage(<LandingPage />) },
+      { path: APP_ROUTES.home, element: withSuspense(<HomePage />) },
+      { path: APP_ROUTES.search, element: withSuspense(<SearchPage />) },
       { path: APP_ROUTES.jobs.list, element: withSuspense(<JobsPage />) },
       {
         path: `${APP_ROUTES.jobs.list}/:publicJobId`,
@@ -125,6 +141,7 @@ export const router = createBrowserRouter([
         path: "/posts/:publicPostId",
         element: withSuspense(<PostLookupPage />),
       },
+      { path: "/coming-soon", element: withSuspense(<ComingSoonPage />) },
       // Protected routes
       {
         path: APP_ROUTES.grievances.mine,
@@ -143,6 +160,10 @@ export const router = createBrowserRouter([
         element: protectedPage(<NotificationsPage />),
       },
       {
+        path: APP_ROUTES.saved,
+        element: protectedPage(<SavedPage />),
+      },
+      {
         path: APP_ROUTES.profile,
         element: protectedPage(<ProfilePage />),
       },
@@ -150,7 +171,11 @@ export const router = createBrowserRouter([
     ],
   },
   {
-    element: <AuthLayout />,
+    element: (
+      <GuestOnlyRoute>
+        <AuthLayout />
+      </GuestOnlyRoute>
+    ),
     children: [
       { path: APP_ROUTES.login, element: withSuspense(<LoginPage />) },
       { path: APP_ROUTES.register, element: withSuspense(<RegisterPage />) },

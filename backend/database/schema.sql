@@ -245,6 +245,7 @@ CREATE TABLE posts (
     moderation_status  nvarchar(20)         NOT NULL CONSTRAINT DF_posts_moderation DEFAULT ('visible'),
     created_at         datetime2            NOT NULL CONSTRAINT DF_posts_created DEFAULT (SYSUTCDATETIME()),
     updated_at         datetime2            NULL,
+    edited_at          datetime2            NULL,  -- set when the author edits the body; non-NULL = shown as edited
     deleted_at         datetime2            NULL,
     CONSTRAINT PK_posts PRIMARY KEY (id),
     CONSTRAINT UQ_posts_public_id UNIQUE (public_post_id),
@@ -257,6 +258,7 @@ CREATE TABLE posts (
 );
 
 CREATE INDEX IX_posts_author ON posts (author_user_id);
+CREATE INDEX IX_posts_author_created ON posts (author_user_id, created_at);
 CREATE INDEX IX_posts_created ON posts (created_at);
 CREATE INDEX IX_posts_visibility_created ON posts (visibility, created_at);
 CREATE INDEX IX_posts_reply_to ON posts (reply_to_post_id);
@@ -307,6 +309,7 @@ CREATE TABLE post_reposts (
 );
 
 CREATE INDEX IX_post_reposts_user ON post_reposts (user_id);
+CREATE INDEX IX_post_reposts_user_created ON post_reposts (user_id, created_at);
 CREATE INDEX IX_post_reposts_created ON post_reposts (created_at);
 
 CREATE TABLE post_bookmarks (
@@ -319,6 +322,32 @@ CREATE TABLE post_bookmarks (
 );
 
 CREATE INDEX IX_post_bookmarks_user ON post_bookmarks (user_id);
+CREATE INDEX IX_post_bookmarks_user_created ON post_bookmarks (user_id, created_at);
+
+-- Named lists a user can file saved posts into. A saved post may sit in several
+-- collections or none (it then just stays in "All saved").
+CREATE TABLE bookmark_collections (
+    id          bigint IDENTITY(1,1) NOT NULL,
+    user_id     bigint        NOT NULL,
+    name        nvarchar(100) NOT NULL,
+    created_at  datetime2     NOT NULL CONSTRAINT DF_bookmark_collections_created DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT PK_bookmark_collections PRIMARY KEY (id),
+    CONSTRAINT FK_bookmark_collections_user FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT UQ_bookmark_collections_user_name UNIQUE (user_id, name)
+);
+
+-- (post_id, user_id) must already be a bookmark, so a post can only be filed once saved.
+CREATE TABLE bookmark_collection_posts (
+    collection_id  bigint    NOT NULL,
+    post_id        bigint    NOT NULL,
+    user_id        bigint    NOT NULL,
+    created_at     datetime2 NOT NULL CONSTRAINT DF_bookmark_collection_posts_created DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT PK_bookmark_collection_posts PRIMARY KEY (collection_id, post_id),
+    CONSTRAINT FK_bookmark_collection_posts_collection FOREIGN KEY (collection_id) REFERENCES bookmark_collections (id),
+    CONSTRAINT FK_bookmark_collection_posts_bookmark FOREIGN KEY (post_id, user_id) REFERENCES post_bookmarks (post_id, user_id)
+);
+
+CREATE INDEX IX_bookmark_collection_posts_bookmark ON bookmark_collection_posts (post_id, user_id);
 
 CREATE TABLE post_comments (
     id                 bigint IDENTITY(1,1) NOT NULL,
@@ -328,7 +357,7 @@ CREATE TABLE post_comments (
     body               nvarchar(max)        NOT NULL,
     moderation_status  nvarchar(20)         NOT NULL CONSTRAINT DF_post_comments_moderation DEFAULT ('visible'),
     created_at         datetime2            NOT NULL CONSTRAINT DF_post_comments_created DEFAULT (SYSUTCDATETIME()),
-    updated_at         datetime2            NULL,
+    updated_at         datetime2            NULL,  -- set only when the author edits (allowed within 30 min of created_at); non-NULL = shown as edited
     deleted_at         datetime2            NULL,
     CONSTRAINT PK_post_comments PRIMARY KEY (id),
     CONSTRAINT FK_post_comments_post FOREIGN KEY (post_id) REFERENCES posts (id),

@@ -52,15 +52,9 @@ api.interceptors.response.use(
       ) {
         return response
       }
-      if (method && method !== "get") {
-        const message =
-          method === "post" && url === API_ENDPOINTS.identity.register
-            ? "Account created successfully."
-            : method === "patch" && url === API_ENDPOINTS.identity.me
-              ? "Profile changes saved."
-              : "Action completed"
+      if (method === "patch" && url === API_ENDPOINTS.identity.me) {
         toast.add({
-          title: message,
+          title: "Profile changes saved.",
           description: getSuccessDescription(response.data),
           type: "success",
         })

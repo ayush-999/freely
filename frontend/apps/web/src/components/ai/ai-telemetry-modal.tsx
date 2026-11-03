@@ -12,7 +12,12 @@ import {
 
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@workspace/ui/components/card"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@workspace/ui/components/card"
 
 interface AiTelemetryModalProps {
   isOpen: boolean
@@ -36,11 +41,11 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-black/60 p-4 backdrop-blur-xs duration-200 fade-in">
       <Card className="relative w-full max-w-lg border-primary/20 bg-background/95 shadow-2xl backdrop-blur-md">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="absolute top-4 right-4 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label="Close dialog"
         >
           <X className="size-4" />
@@ -52,14 +57,18 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
               <Cpu className="size-4 animate-pulse" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-lg font-bold">
                 Freely AI Voice Sentinel
-                <Badge variant="outline" className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-[10px]">
+                <Badge
+                  variant="outline"
+                  className="border-emerald-500/40 text-[10px] text-emerald-600 dark:text-emerald-400"
+                >
                   ONLINE
                 </Badge>
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                Neural telemetry, anonymous voice routing & SLA monitoring pipeline
+                Neural telemetry, anonymous voice routing & SLA monitoring
+                pipeline
               </p>
             </div>
           </div>
@@ -74,8 +83,12 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
                 <span>AI Pipeline Latency</span>
               </div>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-xl font-bold tracking-tight">{latency}ms</span>
-                <span className="text-[10px] text-emerald-500 font-medium">Optimal</span>
+                <span className="text-xl font-bold tracking-tight">
+                  {latency}ms
+                </span>
+                <span className="text-[10px] font-medium text-emerald-500">
+                  Optimal
+                </span>
               </div>
             </div>
 
@@ -85,8 +98,12 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
                 <span>Voice Anonymizer</span>
               </div>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-xl font-bold tracking-tight">256-Bit</span>
-                <span className="text-[10px] text-emerald-500 font-medium">Cloaked</span>
+                <span className="text-xl font-bold tracking-tight">
+                  256-Bit
+                </span>
+                <span className="text-[10px] font-medium text-emerald-500">
+                  Cloaked
+                </span>
               </div>
             </div>
 
@@ -97,7 +114,9 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
               </div>
               <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-xl font-bold tracking-tight">99.8%</span>
-                <span className="text-[10px] text-muted-foreground font-medium">Resolution rate</span>
+                <span className="text-[10px] font-medium text-muted-foreground">
+                  Resolution rate
+                </span>
               </div>
             </div>
 
@@ -108,14 +127,16 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
               </div>
               <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-xl font-bold tracking-tight">3,420+</span>
-                <span className="text-[10px] text-indigo-500 font-medium">This month</span>
+                <span className="text-[10px] font-medium text-indigo-500">
+                  This month
+                </span>
               </div>
             </div>
           </div>
 
           {/* Connected AI Models */}
-          <div className="rounded-lg border border-border/80 bg-muted/10 p-3 space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="space-y-2 rounded-lg border border-border/80 bg-muted/10 p-3">
+            <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
               Connected AI Services
             </span>
             <div className="space-y-1.5 text-xs">
@@ -124,27 +145,33 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
                   <CheckCircle2 className="size-3.5 text-emerald-500" />
                   <span>Speech-to-Text & Urgency Sentiment Analyzer</span>
                 </div>
-                <Badge variant="outline" className="text-[10px]">v2.4 Active</Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  v2.4 Active
+                </Badge>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500" />
                   <span>Whistleblower Voice Masking & Metadata Scrubbing</span>
                 </div>
-                <Badge variant="outline" className="text-[10px]">Active</Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  Active
+                </Badge>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500" />
                   <span>Auto-Triage & Department Routing Engine</span>
                 </div>
-                <Badge variant="outline" className="text-[10px]">Active</Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  Active
+                </Badge>
               </div>
             </div>
           </div>
 
           {/* Footer actions */}
-          <div className="flex items-center justify-between pt-2 border-t">
+          <div className="flex items-center justify-between border-t pt-2">
             <span className="text-[11px] text-muted-foreground">
               Last synced: {lastCheck}
             </span>
@@ -154,12 +181,14 @@ export function AiTelemetryModal({ isOpen, onClose }: AiTelemetryModalProps) {
                 size="sm"
                 onClick={handlePing}
                 disabled={isPinging}
-                className="gap-1.5 text-xs h-8"
+                className="h-8 gap-1.5 text-xs"
               >
-                <RefreshCw className={`size-3 ${isPinging ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`size-3 ${isPinging ? "animate-spin" : ""}`}
+                />
                 {isPinging ? "Pinging..." : "Test AI Ping"}
               </Button>
-              <Button size="sm" onClick={onClose} className="text-xs h-8">
+              <Button size="sm" onClick={onClose} className="h-8 text-xs">
                 Done
               </Button>
             </div>

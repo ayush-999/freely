@@ -1,7 +1,7 @@
-import { login, logout, updateProfile } from "@/store/auth-slice"
+import { login, logout, setUser, updateProfile } from "@/store/auth-slice"
 import { toast } from "@workspace/ui/components/toast"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
-import type { UserUpdateRequest } from "@/types"
+import type { UserMe, UserUpdateRequest } from "@/types"
 
 /** Convenience wrapper around the auth slice. */
 export function useAuth() {
@@ -21,5 +21,6 @@ export function useAuth() {
     },
     updateProfile: (data: UserUpdateRequest) =>
       dispatch(updateProfile(data)).unwrap(),
+    setUser: (userData: UserMe) => dispatch(setUser(userData)),
   }
 }

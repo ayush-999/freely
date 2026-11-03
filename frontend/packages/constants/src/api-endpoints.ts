@@ -12,6 +12,9 @@ export const API_ENDPOINTS = {
     register: "/users",
     login: "/auth/login",
     me: "/users/me",
+    avatar: "/users/me/avatar",
+    cover: "/users/me/cover",
+    searchUsers: "/users/search",
     handleAvailability: (handle: string) =>
       `/users/handle-availability?handle=${encodeURIComponent(handle)}`,
     publicProfile: (handle: string) => `/users/${encodeURIComponent(handle)}`,
@@ -31,13 +34,25 @@ export const API_ENDPOINTS = {
   },
   social: {
     posts: "/posts",
+    uploadMedia: (postId: number) => `/posts/${postId}/media`,
     lookupPost: (publicPostId: string) =>
       `/posts/lookup/${encodeURIComponent(publicPostId)}`,
     feed: "/feed",
+    trendingHashtags: "/trending/hashtags",
     post: (postId: number) => `/posts/${postId}`,
     likes: (postId: number) => `/posts/${postId}/likes`,
     bookmarks: (postId: number) => `/posts/${postId}/bookmarks`,
     reposts: (postId: number) => `/posts/${postId}/reposts`,
+    userPosts: (handle: string) => `/users/${encodeURIComponent(handle)}/posts`,
+    savedPosts: "/bookmarks",
+    collections: "/bookmark-collections",
+    collection: (collectionId: number) =>
+      `/bookmark-collections/${collectionId}`,
+    collectionPost: (collectionId: number, postId: number) =>
+      `/bookmark-collections/${collectionId}/posts/${postId}`,
+    comment: (commentId: number) => `/comments/${commentId}`,
+    deleteComment: (commentId: number) => `/comments/${commentId}`,
+    commentLikes: (commentId: number) => `/comments/${commentId}/likes`,
     comments: (postId: number) => `/posts/${postId}/comments`,
     follow: (userId: number) => `/users/${userId}/follow`,
     moderatePost: (postId: number) => `/moderation/posts/${postId}`,

@@ -12,6 +12,12 @@ freely is organized as a full-stack monorepo:
 - **frontend/** — a [Turborepo](https://turbo.build) monorepo managed with **npm workspaces**,
   containing the web app and all shared frontend packages.
 
+Runtime layout (local development): the **frontend runs in a Docker container**
+(`docker-compose.yml`, port 5173), the **backend runs on the host** (`python run.py`,
+port 8000) and the **database is the local SQL Server** (Windows Authentication, no
+password). The backend is not containerized: a Linux container cannot use Windows
+Authentication.
+
 ### Tech stack (frontend)
 
 | Layer      | Technology                                                        |
@@ -30,6 +36,9 @@ freely is organized as a full-stack monorepo:
 
 ```
 freely/
+├── docker-compose.yml            # Frontend container only (port 5173, proxies /api to the host backend)
+├── README.md                     # How to run the frontend (Docker) and the backend
+├── uploads/                      # Local file storage used by the backend (git-ignored)
 ├── backend/                      # Python FastAPI server (MVC + OOP)
 │   ├── app/
 │   │   ├── main.py               # FastAPI app factory; Swagger UI at /docs
@@ -52,6 +61,8 @@ freely/
     ├── turbo.json                # Turborepo pipeline (build, dev, lint, format, typecheck)
     ├── tsconfig.json             # Base TypeScript config shared by all workspaces
     ├── README.md                 # Frontend overview
+    ├── Dockerfile                # Dev image (node:22-slim); runs npm install + Vite dev server on start
+    ├── .dockerignore             # Keeps node_modules/build output out of the Docker build context
     ├── .npmrc                    # npm registry/install config
     ├── .prettierrc               # Prettier formatting rules
     ├── .prettierignore           # Files excluded from formatting
@@ -76,7 +87,7 @@ freely/
     │   │       ├── config/       # Centralized frontend configuration (config.ts reads Vite env values)
     │   │       ├── hooks/        # App-specific hooks (use-auth.ts wraps the auth slice)
     │   │       ├── layouts/      # Layout shells: root-layout.tsx (nav + API health), auth-layout.tsx
-    │   │       ├── pages/        # Route pages by domain: auth/, feed/, grievances/, jobs/, …
+    │   │       ├── pages/        # Route pages by domain: auth/, home/, grievances/, jobs/, …
     │   │       ├── pwa/          # Progressive Web App code (SW, manifest, offline)
     │   │       ├── routes/       # index.tsx — router; every page lazy-loaded (React.lazy + Suspense)
     │   │       ├── services/     # Axios client (api.ts) + one typed service per backend controller
@@ -113,6 +124,7 @@ freely/
 | ---------- | ------------------------------------------------------------------------------ |
 | `backend/` | FastAPI backend: REST API (Swagger at `/docs`), SQL Server schema, MVC layers. |
 | `frontend/` | All client-side code: apps + shared packages, orchestrated by Turborepo.      |
+| `docker-compose.yml` | Defines the `frontend` container (port 5173, bind mount, dependency volumes). |
 
 ### `backend/` — FastAPI server
 
@@ -195,7 +207,7 @@ Each subfolder is an independently buildable/deployable app.
 - **Auth flow** — Redux auth slice (`src/store/auth-slice.ts`): `login` (OAuth2 password
   flow → stores token), `bootstrapSession` (restores the session on startup), `logout`;
   consumed through the `useAuth()` hook in `src/hooks/`.
-- **Pages** — feed (composer, likes, bookmarks, comments), grievances (submit, my list,
+- **Pages** — home (composer, likes, bookmarks, comments), grievances (submit, my list,
   public tracking, detail with SLA clock + status timeline + feedback), jobs (search,
   detail, apply/save), notifications, profile, public organization/user/post pages,
   login/register.
@@ -260,7 +272,8 @@ packages — apps consume the TypeScript directly, no build step required.
 | A pure helper function (dates, strings…)      | `packages/utils/`                                                          |
 | A new deployable app (admin, mobile web…)     | New folder under `apps/` (auto-picked up by the `apps/*` workspace glob)   |
 | Documentation                                 | `docs/`                                                                    |
-| Docker / CI / deployment config               | `infra/`                                                                   |
+| Docker config (frontend container)            | `docker-compose.yml` (root) + `frontend/Dockerfile`                        |
+| CI / deployment config                        | `infra/`                                                                   |
 | Backend endpoints / models / services         | `backend/app/` (`controllers`, `services`, `repositories`, `models`); DB DDL in `backend/database/schema.sql` |
 
 ### Should you add a new folder?
@@ -289,6 +302,33 @@ Add a shadcn/ui component (from `apps/web/`):
 ```bash
 npx shadcn@latest add <component>   # Installs into packages/ui/src/components
 ```
+
+#### Running the frontend in Docker (from the project root)
+
+**Prerequisite:** Docker Desktop running. No env file is needed; all settings are in
+`docker-compose.yml`.
+
+```bash
+docker compose up -d --build          # build the image and start the container
+docker compose up -d                  # start it again later
+docker compose logs -f frontend       # follow logs
+docker compose down                   # stop and remove the container
+docker compose down -v                # also drop the dependency volumes (fresh npm install)
+docker compose exec frontend npm install <package> -w web   # add a package
+```
+
+| Setting | Value | Purpose |
+| ------- | ----- | ------- |
+| Port | `5173:5173` | Web app at http://localhost:5173 |
+| `VITE_PROXY_TARGET` | `http://host.docker.internal:8000` | Vite proxy target for `/api` (the host backend) |
+| `VITE_USE_POLLING` | `true` | File watching that works with Windows bind mounts |
+| `./frontend:/app` | bind mount | Code edits hot-reload; the source is not copied into the image |
+| `frontend-node-modules`, `web-node-modules` | named volumes | Linux dependencies kept apart from the Windows `node_modules` |
+
+The container only appears in Docker Desktop's **Containers** tab after
+`docker compose up` (`docker build` only creates an image). The first start runs
+`npm install`, so it takes a while. Rebuild with `--build` only when
+`frontend/Dockerfile` changes. Start the backend first, or the app shows proxy errors.
 
 #### Running the backend (from `backend/`)
 
@@ -347,7 +387,7 @@ database (a Windows login needs to be mapped to a database user with read/write)
 ## Conventions
 
 - **Path alias `@`** → `apps/web/src` (configured in `vite.config.ts`).
-- **Frontend environment variables** belong in `apps/web/.env` (or the Git-ignored `apps/web/.env.local`). In dev no variable is needed: the Vite proxy forwards `/api` to `http://localhost:8000` (`apps/web/src/config/config.ts` uses `/api` when `VITE_API_BASE_URL` is unset). Use the shared Axios client from `apps/web/src/services/api.ts` for web API calls. Vite bundles `VITE_` variables into browser code, so never put secrets in them.
+- **Frontend environment variables** belong in `apps/web/.env` (or the Git-ignored `apps/web/.env.local`). In dev no variable is needed: the Vite proxy forwards `/api` to `VITE_PROXY_TARGET` (default `http://localhost:8000`; the Docker container sets `http://host.docker.internal:8000`) (`apps/web/src/config/config.ts` uses `/api` when `VITE_API_BASE_URL` is unset). Use the shared Axios client from `apps/web/src/services/api.ts` for web API calls. Vite bundles `VITE_` variables into browser code, so never put secrets in them.
 - **API paths** are centralized in `@workspace/constants` (`API_ENDPOINTS`) — never hardcode endpoint strings in components or services.
 - **Client route paths** come from `APP_ROUTES` (`@workspace/constants`); register pages in `apps/web/src/routes/index.tsx` with `React.lazy` so every route stays a separate chunk.
 - **Auth token** lives in `@workspace/auth` `tokenStorage` (localStorage key `freely.access_token`); the Axios client attaches it automatically — services never set auth headers by hand.

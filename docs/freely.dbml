@@ -214,10 +214,12 @@ Table posts {
   moderation_status nvarchar(20) [not null, default: 'visible', note: 'visible, hidden, removed, under_review']
   created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
   updated_at datetime2
+  edited_at datetime2 [note: 'Set when the author edits the post body; non-NULL means the post shows as edited (updated_at is also used by moderation)']
   deleted_at datetime2
 
   indexes {
     author_user_id
+    (author_user_id, created_at)
     created_at
     (visibility, created_at)
     reply_to_post_id
@@ -257,11 +259,12 @@ Table post_reposts {
   user_id bigint [not null]
   repost_type nvarchar(20) [not null, default: 'repost', note: 'repost, quote']
   quote_post_id bigint
-  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`, note: 'When the user reposted; orders the repost on their profile feed']
 
   indexes {
     (post_id, user_id) [pk]
     user_id
+    (user_id, created_at)
     created_at
   }
 }
@@ -274,6 +277,32 @@ Table post_bookmarks {
   indexes {
     (post_id, user_id) [pk]
     user_id
+    (user_id, created_at)
+  }
+}
+
+Table bookmark_collections {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  name nvarchar(100) [not null, note: 'Unique per user']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  Note: 'Named lists a user can file saved posts into. A saved post can be in several collections or none.'
+
+  indexes {
+    (user_id, name) [unique]
+  }
+}
+
+Table bookmark_collection_posts {
+  collection_id bigint [not null]
+  post_id bigint [not null]
+  user_id bigint [not null, note: 'Owner; together with post_id must reference an existing post_bookmarks row']
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (collection_id, post_id) [pk]
+    (post_id, user_id)
   }
 }
 
@@ -281,11 +310,11 @@ Table post_comments {
   id bigint [pk, increment]
   post_id bigint [not null]
   user_id bigint [not null]
-  parent_comment_id bigint
+  parent_comment_id bigint [note: 'NULL for a top-level comment; otherwise the comment this one replies to (same post)']
   body nvarchar(max) [not null]
   moderation_status nvarchar(20) [not null, default: 'visible', note: 'visible, hidden, removed, under_review']
   created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
-  updated_at datetime2
+  updated_at datetime2 [note: 'Set only when the author edits the body (allowed within 30 minutes of created_at); non-NULL means the comment shows as edited']
   deleted_at datetime2
 
   indexes {
@@ -675,6 +704,9 @@ Ref: post_reposts.user_id > users.id
 Ref: post_reposts.quote_post_id > posts.id
 Ref: post_bookmarks.post_id > posts.id
 Ref: post_bookmarks.user_id > users.id
+Ref: bookmark_collections.user_id > users.id
+Ref: bookmark_collection_posts.collection_id > bookmark_collections.id
+Ref: bookmark_collection_posts.(post_id, user_id) > post_bookmarks.(post_id, user_id)
 Ref: post_comments.post_id > posts.id
 Ref: post_comments.user_id > users.id
 Ref: post_comments.parent_comment_id > post_comments.id

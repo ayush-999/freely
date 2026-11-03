@@ -25,6 +25,20 @@ class MediaIn(BaseModel):
     sort_order: int = 0
 
 
+class MediaResponse(ORMModel):
+    id: int
+    post_id: int
+    uploaded_by_user_id: Optional[int] = None
+    file_name: str
+    storage_key: str
+    mime_type: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    alt_text: Optional[str] = None
+    media_type: str
+    sort_order: int = 0
+    created_at: datetime
+
+
 class PostCreateRequest(BaseModel):
     body: str = Field(min_length=1)
     visibility: PostVisibility = "public"
@@ -45,9 +59,45 @@ class PostResponse(ORMModel):
     visibility: str
     moderation_status: str
     created_at: datetime
+    edited_at: Optional[datetime] = None
     like_count: int = 0
     comment_count: int = 0
+    repost_count: int = 0
     is_liked: bool = False
+    is_reposted: bool = False
+    is_bookmarked: bool = False
+    author_handle: Optional[str] = None
+    author_full_name: Optional[str] = None
+    author_avatar_storage_key: Optional[str] = None
+    media: list[MediaResponse] = Field(default_factory=list)
+
+
+class PostUpdateRequest(BaseModel):
+    body: str = Field(min_length=1)
+
+
+class ProfilePostResponse(PostResponse):
+    """A post on a profile; ``reposted_by_handle`` is set when it is a repost."""
+
+    activity_at: datetime
+    reposted_by_handle: Optional[str] = None
+    reposted_by_full_name: Optional[str] = None
+
+
+class SavedPostResponse(PostResponse):
+    saved_at: datetime
+    collection_ids: list[int] = Field(default_factory=list)
+
+
+class CollectionCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class CollectionResponse(ORMModel):
+    id: int
+    name: str
+    created_at: datetime
+    post_count: int = 0
 
 
 class PostPublicView(BaseModel):
@@ -58,11 +108,21 @@ class PostPublicView(BaseModel):
     post_type: str
     is_sensitive: bool
     created_at: datetime
+    media: list[MediaResponse] = Field(default_factory=list)
+
+
+class TrendingHashtag(BaseModel):
+    tag: str
+    post_count: int
 
 
 class CommentCreateRequest(BaseModel):
     body: str = Field(min_length=1)
     parent_comment_id: Optional[int] = None
+
+
+class CommentUpdateRequest(BaseModel):
+    body: str = Field(min_length=1)
 
 
 class CommentResponse(ORMModel):
@@ -75,6 +135,11 @@ class CommentResponse(ORMModel):
     body: str
     moderation_status: str
     created_at: datetime
+    updated_at: Optional[datetime] = None
+    like_count: int = 0
+    is_liked: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
 
 
 class RepostRequest(BaseModel):

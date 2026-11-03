@@ -49,7 +49,7 @@ export function AiVoiceTicker({ onOpenTelemetry }: AiVoiceTickerProps) {
   return (
     <aside
       aria-label="AI Voice Live Sentinel"
-      className="border-b border-primary/20 bg-white/90 dark:bg-background/90 px-3 py-1.5 text-xs text-foreground transition-all"
+      className="border-b border-primary/20 bg-white/90 px-3 py-1.5 text-xs text-foreground transition-all dark:bg-background/90"
     >
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
         <div className="flex flex-1 items-center gap-2 overflow-hidden">

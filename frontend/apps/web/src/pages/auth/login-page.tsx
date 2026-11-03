@@ -41,7 +41,7 @@ export function LoginPage() {
   const isEmailLogin = handleValue?.includes("@") ?? false
 
   if (isAuthenticated) {
-    return <Navigate to={APP_ROUTES.feed} replace />
+    return <Navigate to={APP_ROUTES.home} replace />
   }
 
   async function onSubmit(values: LoginFormValues) {
@@ -49,7 +49,7 @@ export function LoginPage() {
     try {
       await login(values.handle, values.password)
       const from = (location.state as { from?: string } | null)?.from
-      navigate(from ?? APP_ROUTES.feed, { replace: true })
+      navigate(from ?? APP_ROUTES.home, { replace: true })
       toast.add({ title: "Welcome back!", type: "success" })
     } catch (loginError) {
       const message =

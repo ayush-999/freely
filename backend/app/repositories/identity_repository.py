@@ -30,6 +30,20 @@ class UserRepository(BaseRepository[User]):
     def email_exists(self, email: str) -> bool:
         return self.get_by_email(email) is not None
 
+    def search_active(self, query: str, limit: int) -> list[User]:
+        """Active users whose handle or full name contains ``query``."""
+        stmt = (
+            select(User)
+            .where(
+                User.is_active == True,  # noqa: E712 - SQL Server rejects IS 1
+                User.user_handle.contains(query, autoescape=True)
+                | User.full_name.contains(query, autoescape=True),
+            )
+            .order_by(User.full_name, User.user_handle)
+            .limit(limit)
+        )
+        return list(self.db.scalars(stmt))
+
 
 class PlatformRoleRepository(BaseRepository[PlatformRole]):
     model = PlatformRole

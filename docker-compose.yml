@@ -1,0 +1,25 @@
+name: freely
+
+# Frontend only. The backend runs on the host (`python run.py`, Windows Authentication
+# to the local SQL Server, no password) and is reached via host.docker.internal:8000.
+
+services:
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      VITE_PROXY_TARGET: http://host.docker.internal:8000
+      VITE_USE_POLLING: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Keep Linux dependencies separate from the Windows node_modules on the host
+      - frontend-node-modules:/app/node_modules
+      - web-node-modules:/app/apps/web/node_modules
+
+volumes:
+  frontend-node-modules:
+  web-node-modules:

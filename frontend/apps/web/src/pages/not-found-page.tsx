@@ -11,7 +11,7 @@ export function NotFoundPage() {
         The page you are looking for does not exist.
       </p>
       <Button asChild variant="outline">
-        <Link to={APP_ROUTES.home}>Back to home</Link>
+        <Link to={APP_ROUTES.landing}>Back to home</Link>
       </Button>
     </div>
   )

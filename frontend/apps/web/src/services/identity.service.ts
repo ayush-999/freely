@@ -43,9 +43,49 @@ export const identityService = {
     return response.data
   },
 
+  async uploadAvatar(file: File): Promise<UserMe> {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.post<UserMe>(
+      API_ENDPOINTS.identity.avatar,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    )
+    return response.data
+  },
+
+  async deleteAvatar(): Promise<UserMe> {
+    const response = await api.delete<UserMe>(API_ENDPOINTS.identity.avatar)
+    return response.data
+  },
+
+  async uploadCover(file: File): Promise<UserMe> {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.post<UserMe>(
+      API_ENDPOINTS.identity.cover,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    )
+    return response.data
+  },
+
+  async deleteCover(): Promise<UserMe> {
+    const response = await api.delete<UserMe>(API_ENDPOINTS.identity.cover)
+    return response.data
+  },
+
   async getPublicProfile(handle: string): Promise<UserPublic> {
     const response = await api.get<UserPublic>(
       API_ENDPOINTS.identity.publicProfile(handle)
+    )
+    return response.data
+  },
+
+  async searchUsers(q: string): Promise<UserPublic[]> {
+    const response = await api.get<UserPublic[]>(
+      API_ENDPOINTS.identity.searchUsers,
+      { params: { q } }
     )
     return response.data
   },

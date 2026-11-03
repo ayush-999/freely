@@ -1,14 +1,14 @@
 import { useState } from "react"
-import { Link, NavLink, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   Bell,
   BriefcaseBusiness,
   Cpu,
-  FileClock,
+  House,
   LogIn,
   LogOut,
   Menu,
-  Newspaper,
+  MessageCircle,
   Search,
   UserPlus,
   UserRound,
@@ -25,17 +25,20 @@ import { AiVoiceTicker } from "@/components/ai/ai-voice-ticker"
 import { ModeToggle } from "@/components/mode-toggle"
 import { useAuth } from "@/hooks/use-auth"
 
-const NAV_ITEMS = [
+import { MORE_ITEMS, MoreMenu } from "./more-menu"
+import { NavItemLink, type NavItem } from "./nav-link-item"
+
+const NAV_ITEMS: readonly NavItem[] = [
   {
-    to: APP_ROUTES.feed,
-    label: "Feed",
-    Icon: Newspaper,
+    to: APP_ROUTES.home,
+    label: "Home",
+    Icon: House,
     iconClassName: "text-muted-foreground group-hover:text-emerald-400",
     activeIconClassName: "text-emerald-400",
   },
   {
-    to: APP_ROUTES.track,
-    label: "Track",
+    to: APP_ROUTES.search,
+    label: "Search",
     Icon: Search,
     iconClassName: "text-muted-foreground group-hover:text-sky-400",
     activeIconClassName: "text-sky-400",
@@ -47,16 +50,9 @@ const NAV_ITEMS = [
     iconClassName: "text-muted-foreground group-hover:text-amber-400",
     activeIconClassName: "text-amber-400",
   },
-] as const
+]
 
-const AUTH_NAV_ITEMS = [
-  {
-    to: APP_ROUTES.grievances.mine,
-    label: "Grievances",
-    Icon: FileClock,
-    iconClassName: "text-muted-foreground group-hover:text-orange-400",
-    activeIconClassName: "text-orange-400",
-  },
+const AUTH_NAV_ITEMS: readonly NavItem[] = [
   {
     to: APP_ROUTES.notifications,
     label: "Notifications",
@@ -65,113 +61,87 @@ const AUTH_NAV_ITEMS = [
     activeIconClassName: "text-rose-400",
   },
   {
+    to: APP_ROUTES.comingSoon("Messaging"),
+    label: "Messaging",
+    Icon: MessageCircle,
+    iconClassName: "text-muted-foreground group-hover:text-fuchsia-400",
+    activeIconClassName: "text-fuchsia-400",
+  },
+]
+
+/** Everything the desktop "More" dropdown holds, flattened for the mobile menu. */
+const MOBILE_EXTRA_ITEMS: readonly NavItem[] = [
+  {
     to: APP_ROUTES.profile,
     label: "Profile",
     Icon: UserRound,
     iconClassName: "text-muted-foreground group-hover:text-cyan-400",
     activeIconClassName: "text-cyan-400",
   },
-] as const
-
-function navLinkClass({ isActive }: { isActive: boolean }) {
-  return cn(
-    "group relative flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium transition-all hover:bg-muted/50 hover:text-foreground",
-    isActive
-      ? "bg-primary/10 font-semibold text-foreground text-primary"
-      : "text-muted-foreground"
-  )
-}
+  ...MORE_ITEMS.map((item) => ({
+    ...item,
+    iconClassName: "text-muted-foreground group-hover:text-violet-400",
+    activeIconClassName: "text-violet-400",
+  })),
+]
 
 interface HeaderProps {
   onOpenTelemetry: () => void
 }
 
 export function Header({ onOpenTelemetry }: HeaderProps) {
-  const { user, isAuthenticated, logout } = useAuth()
+  const { isAuthenticated, logout } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   function handleLogout() {
     logout()
-    navigate(APP_ROUTES.home)
+    navigate(APP_ROUTES.landing)
   }
 
   return (
     <>
       <AiVoiceTicker onOpenTelemetry={onOpenTelemetry} />
 
-      <header className="sticky top-0 z-30 border-b bg-white/90 dark:bg-background/90 backdrop-blur-md transition-all">
+      <header className="sticky top-0 z-30 border-b bg-white/90 backdrop-blur-md transition-all dark:bg-background/90">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-4">
-            <Link to={APP_ROUTES.home} className="flex items-center">
+            <Link to={APP_ROUTES.landing} className="flex items-center">
               <FreelyLogo />
             </Link>
           </div>
 
-          <nav className="hidden items-center gap-1 md:flex">
+          <nav className="ml-auto hidden items-center gap-1 md:flex">
             {NAV_ITEMS.map((item) => (
-              <NavLink key={item.to} to={item.to} className={navLinkClass}>
-                {({ isActive }) => (
-                  <>
-                    <item.Icon
-                      className={cn(
-                        "size-4 transition-colors",
-                        isActive ? item.activeIconClassName : item.iconClassName
-                      )}
-                    />
-                    {item.label}
-                  </>
-                )}
-              </NavLink>
+              <NavItemLink key={item.to} item={item} />
             ))}
-            {isAuthenticated &&
-              AUTH_NAV_ITEMS.map((item) => (
-                <NavLink key={item.to} to={item.to} className={navLinkClass}>
-                  {({ isActive }) => (
-                    <>
-                      <item.Icon
-                        className={cn(
-                          "size-4 transition-colors",
-                          isActive
-                            ? item.activeIconClassName
-                            : item.iconClassName
-                        )}
-                      />
-                      {item.label}
-                    </>
-                  )}
-                </NavLink>
-              ))}
+            {isAuthenticated && (
+              <>
+                {AUTH_NAV_ITEMS.map((item) => (
+                  <NavItemLink key={item.to} item={item} />
+                ))}
+                <MoreMenu onLogout={handleLogout} />
+              </>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2">
-                <span className="hidden text-xs font-medium text-muted-foreground lg:inline">
-                  @{user?.user_handle}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleLogout}
-                  className="h-8 text-xs"
-                >
-                  <LogOut className="size-3.5" />
-                  Log out
-                </Button>
-              </div>
-            ) : (
-              <div className="hidden items-center gap-1.5 sm:flex">
+            {!isAuthenticated && (
+              // The home page's left card already offers log in / sign up on lg+.
+              <div
+                className={cn(
+                  "hidden items-center gap-1.5 sm:flex",
+                  pathname === APP_ROUTES.home && "lg:hidden"
+                )}
+              >
                 <Button
                   variant="ghost"
                   size="sm"
                   asChild
                   className="h-8 text-xs"
                 >
-                  <Link to={APP_ROUTES.login}>
-                    {/* <LogIn className="size-3.5" /> */}
-                    Log in
-                  </Link>
+                  <Link to={APP_ROUTES.login}>Log in</Link>
                 </Button>
                 <Button
                   variant="outline"
@@ -179,15 +149,15 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
                   asChild
                   className="h-8 text-xs"
                 >
-                  <Link to={APP_ROUTES.register}>
-                    {/* <UserPlus className="size-3.5" /> */}
-                    Sign up
-                  </Link>
+                  <Link to={APP_ROUTES.register}>Sign up</Link>
                 </Button>
               </div>
             )}
 
-            <ModeToggle />
+            {/* Logged-in users switch theme from the More menu on desktop. */}
+            <div className={cn(isAuthenticated && "md:hidden")}>
+              <ModeToggle />
+            </div>
 
             <Button
               variant="ghost"
@@ -209,50 +179,31 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
           <div className="animate-in space-y-3 border-t bg-background px-4 py-3 duration-150 slide-in-from-top-2 md:hidden">
             <nav className="flex flex-col space-y-1">
               {NAV_ITEMS.map((item) => (
-                <NavLink
+                <NavItemLink
                   key={item.to}
-                  to={item.to}
+                  item={item}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={navLinkClass}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <item.Icon
-                        className={cn(
-                          "size-4 transition-colors",
-                          isActive
-                            ? item.activeIconClassName
-                            : item.iconClassName
-                        )}
-                      />
-                      {item.label}
-                    </>
-                  )}
-                </NavLink>
+                />
               ))}
-              {isAuthenticated &&
-                AUTH_NAV_ITEMS.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={navLinkClass}
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <item.Icon
-                          className={cn(
-                            "size-4 transition-colors",
-                            isActive
-                              ? item.activeIconClassName
-                              : item.iconClassName
-                          )}
-                        />
-                        {item.label}
-                      </>
-                    )}
-                  </NavLink>
-                ))}
+              {isAuthenticated && (
+                <>
+                  {AUTH_NAV_ITEMS.map((item) => (
+                    <NavItemLink
+                      key={item.to}
+                      item={item}
+                      onClick={() => setMobileMenuOpen(false)}
+                    />
+                  ))}
+                  <div className="my-1 h-px bg-border" />
+                  {MOBILE_EXTRA_ITEMS.map((item) => (
+                    <NavItemLink
+                      key={item.to}
+                      item={item}
+                      onClick={() => setMobileMenuOpen(false)}
+                    />
+                  ))}
+                </>
+              )}
             </nav>
 
             <div className="flex flex-col gap-2 border-t pt-2">
@@ -275,7 +226,20 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
                 </Badge>
               </button>
 
-              {!isAuthenticated && (
+              {isAuthenticated ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => {
+                    setMobileMenuOpen(false)
+                    handleLogout()
+                  }}
+                >
+                  <LogOut className="size-3.5" />
+                  Log out
+                </Button>
+              ) : (
                 <div className="flex items-center gap-2 pt-1">
                   <Button
                     variant="outline"
