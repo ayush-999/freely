@@ -177,11 +177,14 @@ export function MoreMenu({ onLogout }: { onLogout: () => void }) {
               setOpen(false)
               onLogout()
             }}
-            className={itemClassName}
+            className={
+              itemClassName +
+              " text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:outline-none"
+            }
           >
             <LogOut
               aria-hidden="true"
-              className="size-4 text-muted-foreground"
+              className="size-4 text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10"
             />
             Log out
           </button>

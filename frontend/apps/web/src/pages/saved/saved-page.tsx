@@ -15,6 +15,7 @@ import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
 import { getApiErrorMessage } from "@workspace/utils"
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog"
 import { LoadingFallback } from "@/components/loading-fallback"
 import { ProfilePostCard } from "@/components/profile-posts"
 import { socialService } from "@/services/social.service"
@@ -125,6 +126,8 @@ export function SavedPage() {
   const [collections, setCollections] = useState<BookmarkCollection[] | null>(
     null
   )
+  const [deleteConfirmation, setDeleteConfirmation] =
+    useState<BookmarkCollection | null>(null)
   const [activeKey, setActiveKey] = useState(ALL_SAVED)
   const [reloadKey, setReloadKey] = useState(0)
   const [result, setResult] = useState<SavedResult | null>(null)
@@ -204,26 +207,16 @@ export function SavedPage() {
     }
   }
 
-  async function handleDeleteCollection(collection: BookmarkCollection) {
-    if (
-      !window.confirm(
-        `Delete the collection "${collection.name}"? Its posts stay saved.`
-      )
-    ) {
-      return
-    }
-    try {
-      await socialService.deleteCollection(collection.id)
-      setCollections((list) =>
-        (list ?? []).filter((item) => item.id !== collection.id)
-      )
-      setActiveKey(ALL_SAVED)
-      setReloadKey((key) => key + 1)
-    } catch (deleteError) {
-      setError(
-        getApiErrorMessage(deleteError, "Could not delete the collection")
-      )
-    }
+  async function handleConfirmDeleteCollection() {
+    if (!deleteConfirmation) return
+
+    await socialService.deleteCollection(deleteConfirmation.id)
+    setCollections((list) =>
+      (list ?? []).filter((item) => item.id !== deleteConfirmation.id)
+    )
+    setActiveKey(ALL_SAVED)
+    setReloadKey((key) => key + 1)
+    setDeleteConfirmation(null)
   }
 
   async function handleToggleMembership(
@@ -382,7 +375,7 @@ export function SavedPage() {
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive!"
-            onClick={() => void handleDeleteCollection(activeCollection)}
+            onClick={() => setDeleteConfirmation(activeCollection)}
           >
             <Trash2 aria-hidden="true" />
             Delete collection
@@ -451,6 +444,15 @@ export function SavedPage() {
             }
           />
         ))
+      )}
+      {deleteConfirmation && (
+        <ConfirmationDialog
+          title="Delete this collection?"
+          description={`Delete the collection "${deleteConfirmation.name}"? Its posts stay saved. This action cannot be undone.`}
+          confirmLabel="OK, delete collection"
+          onClose={() => setDeleteConfirmation(null)}
+          onConfirm={handleConfirmDeleteCollection}
+        />
       )}
     </div>
   )

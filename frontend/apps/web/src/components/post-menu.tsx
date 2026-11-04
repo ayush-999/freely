@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Ellipsis, type LucideIcon } from "lucide-react"
+import { EllipsisVertical, type LucideIcon } from "lucide-react"
 
 import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
@@ -85,7 +85,7 @@ export function PostMenu({ items }: { items: PostMenuItem[] }) {
         onClick={toggle}
         className="rounded-full text-muted-foreground"
       >
-        <Ellipsis aria-hidden="true" />
+        <EllipsisVertical aria-hidden="true" />
       </Button>
       {open &&
         createPortal(
@@ -110,7 +110,7 @@ export function PostMenu({ items }: { items: PostMenuItem[] }) {
                     ? "text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10"
                     : "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
                 )}
-              >
+              > 
                 <Icon
                   aria-hidden="true"
                   className={cn(

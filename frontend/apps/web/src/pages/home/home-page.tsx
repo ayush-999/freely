@@ -24,6 +24,7 @@ import {
   Video,
   X,
   HatGlasses,
+  MessageCircleText,
 } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
@@ -524,7 +525,7 @@ export function HomePage() {
 
   return (
     <>
-      <div className="mx-auto grid max-w-6xl justify-center gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,40rem)_18rem]">
+      <div className="mx-auto grid max-w-6xl justify-center gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,40rem)_18rem]">
         <aside className="sticky top-24 hidden self-start lg:block">
           {isAuthenticated ? <ProfileSummaryCard /> : <GuestLoginCard />}
         </aside>
@@ -1057,7 +1058,7 @@ export function HomePage() {
                           aria-expanded={!!openComments[post.id]}
                           onClick={() => void toggleComments(post.id)}
                         >
-                          <MessageSquareText
+                          <MessageCircleText
                             aria-hidden="true"
                             className={
                               openComments[post.id]
