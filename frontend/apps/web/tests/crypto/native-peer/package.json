@@ -1,0 +1,7 @@
+﻿{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@signalapp/libsignal-client": "0.101.0"
+  }
+}

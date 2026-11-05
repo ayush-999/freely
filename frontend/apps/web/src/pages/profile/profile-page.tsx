@@ -10,7 +10,6 @@ import {
   Loader2,
   Mail,
   Trash2,
-  Upload,
 } from "lucide-react"
 
 import { APP_ROUTES } from "@workspace/constants"
@@ -474,43 +473,6 @@ export function ProfilePage() {
                     {errors.preferred_language.message}
                   </p>
                 )}
-              </div>
-            </div>
-
-            {/* Quick Photo Management Summary within Edit Form */}
-            <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 p-4">
-              <h3 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                Photo Storage & Management
-              </h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Your profile photo and cover photo are stored securely under{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  uploads/profile/{user.id}/
-                </code>
-                . When replaced or removed, old files are automatically cleaned
-                up to prevent clutter.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => avatarInputRef.current?.click()}
-                  className="h-8 gap-1.5 text-xs"
-                >
-                  <Upload className="size-3" />
-                  Change Profile Photo
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => coverInputRef.current?.click()}
-                  className="h-8 gap-1.5 text-xs"
-                >
-                  <Upload className="size-3" />
-                  Change Cover Photo
-                </Button>
               </div>
             </div>
 

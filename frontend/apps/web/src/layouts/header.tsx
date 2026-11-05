@@ -61,7 +61,7 @@ const AUTH_NAV_ITEMS: readonly NavItem[] = [
     activeIconClassName: "text-rose-400",
   },
   {
-    to: APP_ROUTES.comingSoon("Messaging"),
+    to: APP_ROUTES.messaging,
     label: "Messaging",
     Icon: MessageCircle,
     iconClassName: "text-muted-foreground group-hover:text-fuchsia-400",

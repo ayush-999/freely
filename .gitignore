@@ -3,3 +3,10 @@ opencode.jsonc
 .vscode
 uploads
 .env
+.tools/
+test-results/
+playwright-report/
+__pycache__/
+.pytest_cache/
+.tools
+.codex

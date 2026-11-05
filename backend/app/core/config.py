@@ -26,6 +26,26 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # Chat is opt-in only after the owner manually applies its migration and
+    # validates the pinned browser crypto build. No startup SQL is performed.
+    chat_enabled: bool = False
+    chat_schema_ready: bool = False
+    chat_crypto_ready: bool = False
+    chat_worker_count: int = 1
+    chat_max_devices_per_user: int = 8
+    chat_max_connections_per_user: int = 8
+    chat_max_connections: int = 512
+    chat_max_pending_auth: int = 32
+    chat_auth_timeout_seconds: int = 10
+    chat_max_frame_bytes: int = 2 * 1024 * 1024
+    chat_allow_insecure_localhost: bool = True
+    chat_allowed_origins: str = ""
+
+    @property
+    def chat_origin_list(self) -> list[str]:
+        origins = self.chat_allowed_origins or self.cors_origins
+        return [origin.strip() for origin in origins.split(",") if origin.strip()]
+
     # Database — Microsoft SQL Server
     # Leave db_user empty to connect via Windows Authentication (trusted connection).
     db_server: str = "localhost"

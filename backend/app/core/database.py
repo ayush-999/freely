@@ -15,6 +15,7 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     echo=settings.debug,
+    hide_parameters=True,
     # Without this, String binds as VARCHAR and emoji/non-Latin text becomes "?".
     use_setinputsizes=False,
 )

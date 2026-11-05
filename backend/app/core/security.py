@@ -63,6 +63,11 @@ def _user_from_token(db: Session, token: str) -> User:
     return user
 
 
+def resolve_token_user(db: Session, token: str) -> User:
+    """Shared active-user resolver for REST and timed WebSocket authentication."""
+    return _user_from_token(db, token)
+
+
 def get_current_user(
     db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
 ) -> User:

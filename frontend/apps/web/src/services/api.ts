@@ -34,7 +34,7 @@ function getSuccessDescription(data: unknown): string | undefined {
 // Attach the bearer token to every request when a session exists.
 api.interceptors.request.use((requestConfig) => {
   const token = tokenStorage.get()
-  if (token) {
+  if (token && !requestConfig.headers.Authorization) {
     requestConfig.headers.Authorization = `Bearer ${token}`
   }
   return requestConfig
@@ -80,6 +80,7 @@ api.interceptors.response.use(
       axios.isAxiosError(error) &&
       error.response?.status === 401 &&
       tokenStorage.get() &&
+      error.config?.headers.Authorization === `Bearer ${tokenStorage.get()}` &&
       !window.location.pathname.startsWith("/login")
     ) {
       tokenStorage.clear()

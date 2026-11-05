@@ -16,4 +16,6 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=settings.debug,
+        ws_max_size=settings.chat_max_frame_bytes,
+        ws_max_queue=4,
     )

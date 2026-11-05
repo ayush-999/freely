@@ -11,10 +11,12 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.controllers.router import api_router
+from app.controllers.chat_controller import validate_chat_runtime
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 
 settings = get_settings()
+validate_chat_runtime()
 
 app = FastAPI(
     title=settings.app_name,

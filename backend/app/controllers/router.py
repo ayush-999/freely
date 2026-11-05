@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.controllers import (
+    chat_controller,
     ai_controller,
     grievance_controller,
     health_controller,
@@ -16,6 +17,7 @@ from app.controllers import (
 )
 
 api_router = APIRouter()
+api_router.include_router(chat_controller.router, tags=["encrypted messaging"])
 api_router.include_router(health_controller.router, tags=["health"])
 api_router.include_router(identity_controller.router, tags=["identity"])
 api_router.include_router(organization_controller.router, tags=["organizations"])

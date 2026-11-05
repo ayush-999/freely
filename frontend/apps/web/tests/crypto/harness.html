@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Isolated chat crypto tests</title>
+  </head>
+  <body>
+    <p>Local test harness. No backend or database connection.</p>
+    <script type="module">
+      import { ChatCrypto } from "/src/crypto/index.ts"
+      import {
+        SignalEngine,
+        createSecrets,
+        initializeSignal,
+        refreshKeys,
+      } from "/src/crypto/signal-engine.ts"
+      import { encode64, decode64 } from "/src/crypto/encoding.ts"
+      window.harness = {
+        ChatCrypto,
+        SignalEngine,
+        createSecrets,
+        initializeSignal,
+        refreshKeys,
+        encode64,
+        decode64,
+      }
+    </script>
+  </body>
+</html>

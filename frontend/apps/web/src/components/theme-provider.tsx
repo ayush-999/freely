@@ -39,19 +39,13 @@ function getSystemTheme(): ResolvedTheme {
 }
 
 function disableTransitionsTemporarily() {
-  const style = document.createElement("style")
-  style.appendChild(
-    document.createTextNode(
-      "*,*::before,*::after{-webkit-transition:none!important;transition:none!important}"
-    )
-  )
-  document.head.appendChild(style)
+  document.documentElement.classList.add("theme-changing")
 
   return () => {
     window.getComputedStyle(document.body)
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        style.remove()
+        document.documentElement.classList.remove("theme-changing")
       })
     })
   }

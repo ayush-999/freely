@@ -16,6 +16,7 @@ export const APP_ROUTES = {
     detail: (publicJobId: string) => `/jobs/${publicJobId}`,
   },
   notifications: "/notifications",
+  messaging: "/messages",
   saved: "/saved",
   comingSoon: (feature: string) =>
     `/coming-soon?feature=${encodeURIComponent(feature)}`,

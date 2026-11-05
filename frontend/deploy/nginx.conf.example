@@ -1,0 +1,60 @@
+# Example production edge configuration. Supply your own DNS and TLS files.
+# Keep the API on one worker while CHAT uses its in-process realtime hub.
+map $http_upgrade $freely_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 80;
+    server_name freely.example;
+    return 308 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name freely.example;
+    ssl_certificate /etc/ssl/freely/fullchain.pem;
+    ssl_certificate_key /etc/ssl/freely/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # npm run build -w web produces this document root. Adjust for your host.
+    root /srv/freely/frontend/apps/web/dist;
+    index index.html;
+    include mime.types;
+    # Set this to your existing media-upload policy. Chat itself is bounded
+    # independently by FastAPI's 2 MiB request/frame validation.
+    client_max_body_size 50m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Permissions-Policy "camera=(), microphone=(self), geolocation=()" always;
+    # The build includes its script/style/connect CSP. This additional response
+    # policy supplies frame-ancestors, which cannot be enforced by a meta tag.
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $freely_connection_upgrade;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 90s;
+        # Do not log request bodies, headers or authentication frames.
+    }
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /assets/ {
+        try_files $uri =404;
+    }
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

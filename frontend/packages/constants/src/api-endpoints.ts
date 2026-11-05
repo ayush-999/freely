@@ -4,6 +4,24 @@
  * configured base URL of the consuming app (see apps/web/src/config).
  */
 export const API_ENDPOINTS = {
+  chat: {
+    config: "/chat/config",
+    conversations: "/chat/conversations",
+    conversation: (id: string) =>
+      `/chat/conversations/${encodeURIComponent(id)}`,
+    messages: (id: string) =>
+      `/chat/conversations/${encodeURIComponent(id)}/messages`,
+    send: "/chat/messages",
+    devices: "/chat/devices",
+    revoke: (id: string) => `/chat/devices/${encodeURIComponent(id)}/revoke`,
+    pending: (id: string) => `/chat/devices/${encodeURIComponent(id)}/pending`,
+    receipt: (id: string) =>
+      `/chat/messages/${encodeURIComponent(id)}/receipts`,
+    keys: (handle: string) => `/chat/keys/${encodeURIComponent(handle)}`,
+    claim: (handle: string) => `/chat/keys/${encodeURIComponent(handle)}/claim`,
+    uploadKeys: "/chat/keys/upload",
+    socket: "/chat/ws",
+  },
   health: {
     liveness: "/health",
     database: "/health/db",

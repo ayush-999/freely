@@ -103,6 +103,9 @@ const NotFoundPage = lazy(() =>
     default: module.NotFoundPage,
   }))
 )
+const ChatPage = lazy(() =>
+  import("@/pages/chat/chat-page").then((module) => ({ default: module.ChatPage }))
+)
 
 /** Wrap a lazily loaded page with a shared suspense fallback. */
 function withSuspense(element: ReactNode) {
@@ -143,6 +146,7 @@ export const router = createBrowserRouter([
       },
       { path: "/coming-soon", element: withSuspense(<ComingSoonPage />) },
       // Protected routes
+      { path: APP_ROUTES.messaging, element: protectedPage(<ChatPage />) },
       {
         path: APP_ROUTES.grievances.mine,
         element: protectedPage(<MyGrievancesPage />),

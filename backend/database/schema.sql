@@ -1040,7 +1040,138 @@ CREATE INDEX IX_saved_jobs_job ON saved_jobs (job_posting_id);
 CREATE INDEX IX_saved_jobs_created ON saved_jobs (created_at);
 
 /* ============================================================================
-   9. SEED DATA — platform-wide roles (referenced by user_platform_roles)
+   9. END-TO-END ENCRYPTED ONE-TO-ONE CHAT (additive; public keys/ciphertext only)
+   Protocol: signal-pqxdh-v1. Private keys and plaintext NEVER belong here.
+   Conversation membership beyond device ownership is checked in ChatService.
+   Apply migrations/001_chat_up.sql manually to an EXISTING database instead.
+   ============================================================================ */
+
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+
+CREATE TABLE dbo.chat_conversations (
+    id BIGINT NOT NULL IDENTITY(1,1),
+    public_conversation_id NVARCHAR(40) NOT NULL,
+    participant_low_user_id BIGINT NOT NULL,
+    participant_high_user_id BIGINT NOT NULL,
+    created_at DATETIME2 NOT NULL CONSTRAINT DF_chat_conversations_created DEFAULT (SYSUTCDATETIME()),
+    updated_at DATETIME2 NULL,
+    CONSTRAINT [PK_chat_conversations] PRIMARY KEY (id),
+    CONSTRAINT [UQ_chat_conversations_public_id] UNIQUE (public_conversation_id),
+    CONSTRAINT [UQ_chat_conversations_pair] UNIQUE (participant_low_user_id, participant_high_user_id),
+    CONSTRAINT [FK_chat_conversations_low_user] FOREIGN KEY(participant_low_user_id) REFERENCES dbo.users (id),
+    CONSTRAINT [FK_chat_conversations_high_user] FOREIGN KEY(participant_high_user_id) REFERENCES dbo.users (id),
+    CONSTRAINT [CK_chat_conversations_distinct_pair] CHECK (participant_low_user_id < participant_high_user_id),
+    CONSTRAINT [CK_chat_conversations_updated] CHECK (updated_at IS NULL OR updated_at >= created_at)
+);
+
+CREATE INDEX [IX_chat_conversations_high_updated] ON dbo.chat_conversations (participant_high_user_id, updated_at, id);
+
+CREATE INDEX [IX_chat_conversations_low_updated] ON dbo.chat_conversations (participant_low_user_id, updated_at, id);
+
+CREATE TABLE dbo.chat_devices (
+    id BIGINT NOT NULL IDENTITY(1,1),
+    public_device_id NVARCHAR(40) NOT NULL,
+    user_id BIGINT NOT NULL,
+    signal_device_id INTEGER NOT NULL,
+    registration_id INTEGER NOT NULL,
+    protocol_version NVARCHAR(32) NOT NULL,
+    identity_public_key VARBINARY(33) NOT NULL,
+    label NVARCHAR(100) NULL,
+    created_at DATETIME2 NOT NULL CONSTRAINT DF_chat_devices_created DEFAULT (SYSUTCDATETIME()),
+    last_seen_at DATETIME2 NULL,
+    revoked_at DATETIME2 NULL,
+    CONSTRAINT [PK_chat_devices] PRIMARY KEY (id),
+    CONSTRAINT [UQ_chat_devices_public_id] UNIQUE (public_device_id),
+    CONSTRAINT [UQ_chat_devices_user_signal_id] UNIQUE (user_id, signal_device_id),
+    CONSTRAINT [UQ_chat_devices_owner_id] UNIQUE (user_id, id),
+    CONSTRAINT [FK_chat_devices_user] FOREIGN KEY(user_id) REFERENCES dbo.users (id),
+    CONSTRAINT [CK_chat_devices_signal_id] CHECK (signal_device_id BETWEEN 1 AND 127),
+    CONSTRAINT [CK_chat_devices_registration_id] CHECK (registration_id BETWEEN 1 AND 16383),
+    CONSTRAINT [CK_chat_devices_protocol] CHECK (protocol_version = 'signal-pqxdh-v1'),
+    CONSTRAINT [CK_chat_devices_identity_key] CHECK (DATALENGTH(identity_public_key) = 33),
+    CONSTRAINT [CK_chat_devices_last_seen] CHECK (last_seen_at IS NULL OR last_seen_at >= created_at),
+    CONSTRAINT [CK_chat_devices_revoked] CHECK (revoked_at IS NULL OR revoked_at >= created_at)
+);
+
+CREATE INDEX [IX_chat_devices_active_user] ON dbo.chat_devices (user_id, signal_device_id) WHERE revoked_at IS NULL;
+
+CREATE TABLE dbo.chat_prekeys (
+    device_id BIGINT NOT NULL,
+    key_kind NVARCHAR(32) NOT NULL,
+    key_id INTEGER NOT NULL,
+    protocol_version NVARCHAR(32) NOT NULL,
+    public_key VARBINARY(1569) NOT NULL,
+    signature VARBINARY(64) NULL,
+    created_at DATETIME2 NOT NULL CONSTRAINT DF_chat_prekeys_created DEFAULT (SYSUTCDATETIME()),
+    expires_at DATETIME2 NULL,
+    retired_at DATETIME2 NULL,
+    claimed_at DATETIME2 NULL,
+    CONSTRAINT [PK_chat_prekeys] PRIMARY KEY (device_id, key_kind, key_id),
+    CONSTRAINT [FK_chat_prekeys_device] FOREIGN KEY(device_id) REFERENCES dbo.chat_devices (id),
+    CONSTRAINT [CK_chat_prekeys_kind] CHECK (key_kind IN ('ec_signed','ec_one_time','kem_one_time','kem_last_resort')),
+    CONSTRAINT [CK_chat_prekeys_key_id] CHECK (key_id BETWEEN 0 AND 16777215),
+    CONSTRAINT [CK_chat_prekeys_protocol] CHECK (protocol_version = 'signal-pqxdh-v1'),
+    CONSTRAINT [CK_chat_prekeys_public_material] CHECK ((key_kind = 'ec_one_time' AND DATALENGTH(public_key) = 33 AND signature IS NULL) OR (key_kind = 'ec_signed' AND DATALENGTH(public_key) = 33 AND signature IS NOT NULL AND DATALENGTH(signature) = 64) OR (key_kind IN ('kem_one_time','kem_last_resort') AND DATALENGTH(public_key) = 1569 AND signature IS NOT NULL AND DATALENGTH(signature) = 64)),
+    CONSTRAINT [CK_chat_prekeys_expiry] CHECK (expires_at IS NULL OR expires_at > created_at),
+    CONSTRAINT [CK_chat_prekeys_retired] CHECK (retired_at IS NULL OR retired_at >= created_at),
+    CONSTRAINT [CK_chat_prekeys_claimed] CHECK (claimed_at IS NULL OR (key_kind IN ('ec_one_time','kem_one_time') AND claimed_at >= created_at))
+);
+
+CREATE INDEX [IX_chat_prekeys_available] ON dbo.chat_prekeys (device_id, key_kind, key_id) WHERE claimed_at IS NULL AND retired_at IS NULL;
+
+CREATE TABLE dbo.chat_messages (
+    id BIGINT NOT NULL IDENTITY(1,1),
+    public_message_id NVARCHAR(40) NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    sender_user_id BIGINT NOT NULL,
+    sender_device_id BIGINT NOT NULL,
+    client_message_id UNIQUEIDENTIFIER NOT NULL,
+    request_digest VARBINARY(32) NOT NULL,
+    created_at DATETIME2 NOT NULL CONSTRAINT DF_chat_messages_created DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT [PK_chat_messages] PRIMARY KEY (id),
+    CONSTRAINT [UQ_chat_messages_public_id] UNIQUE (public_message_id),
+    CONSTRAINT [UQ_chat_messages_client_id] UNIQUE (sender_device_id, client_message_id),
+    CONSTRAINT [FK_chat_messages_conversation] FOREIGN KEY(conversation_id) REFERENCES dbo.chat_conversations (id),
+    CONSTRAINT [FK_chat_messages_sender_device] FOREIGN KEY(sender_user_id, sender_device_id) REFERENCES dbo.chat_devices (user_id, id),
+    CONSTRAINT [CK_chat_messages_digest] CHECK (DATALENGTH(request_digest) = 32)
+);
+
+CREATE INDEX [IX_chat_messages_conversation_id] ON dbo.chat_messages (conversation_id, id);
+
+CREATE TABLE dbo.chat_message_envelopes (
+    id BIGINT NOT NULL IDENTITY(1,1),
+    message_id BIGINT NOT NULL,
+    recipient_user_id BIGINT NOT NULL,
+    recipient_device_id BIGINT NOT NULL,
+    protocol_version NVARCHAR(32) NOT NULL,
+    message_type INTEGER NOT NULL,
+    ciphertext VARBINARY(max) NOT NULL,
+    created_at DATETIME2 NOT NULL CONSTRAINT DF_chat_message_envelopes_created DEFAULT (SYSUTCDATETIME()),
+    delivered_at DATETIME2 NULL,
+    read_at DATETIME2 NULL,
+    CONSTRAINT [PK_chat_message_envelopes] PRIMARY KEY (id),
+    CONSTRAINT [UQ_chat_envelopes_message_device] UNIQUE (message_id, recipient_device_id),
+    CONSTRAINT [FK_chat_envelopes_message] FOREIGN KEY(message_id) REFERENCES dbo.chat_messages (id),
+    CONSTRAINT [FK_chat_envelopes_recipient_device] FOREIGN KEY(recipient_user_id, recipient_device_id) REFERENCES dbo.chat_devices (user_id, id),
+    CONSTRAINT [CK_chat_envelopes_protocol] CHECK (protocol_version = 'signal-pqxdh-v1'),
+    CONSTRAINT [CK_chat_envelopes_message_type] CHECK (message_type IN (2,3)),
+    CONSTRAINT [CK_chat_envelopes_ciphertext] CHECK (DATALENGTH(ciphertext) BETWEEN 1 AND 65536),
+    CONSTRAINT [CK_chat_envelopes_delivered] CHECK (delivered_at IS NULL OR delivered_at >= created_at),
+    CONSTRAINT [CK_chat_envelopes_read] CHECK (read_at IS NULL OR (delivered_at IS NOT NULL AND read_at >= delivered_at))
+);
+
+CREATE INDEX [IX_chat_envelopes_device_history] ON dbo.chat_message_envelopes (recipient_device_id, message_id);
+
+CREATE INDEX [IX_chat_envelopes_pending] ON dbo.chat_message_envelopes (recipient_device_id, id) WHERE delivered_at IS NULL;
+
+/* ============================================================================
+   10. SEED DATA — platform-wide roles (referenced by user_platform_roles)
    ============================================================================ */
 
 INSERT INTO platform_roles (name, description) VALUES
@@ -1050,4 +1181,4 @@ INSERT INTO platform_roles (name, description) VALUES
 
 COMMIT TRANSACTION;
 
-PRINT 'Freely schema created successfully: 45 tables + seeds.';
+PRINT 'Freely schema created successfully: 52 tables + seeds.';

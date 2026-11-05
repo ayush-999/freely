@@ -96,3 +96,28 @@ Use `POST /api/v1/users` to register, then `POST /api/v1/auth/login` and click
 - Multi-entity writes run in a **single DB transaction** (see services).
 - Append-only tables (`*_status_history`, `audit_logs`, `job_receipts`,
   `post_views`) are never updated — corrections create new rows.
+
+## End-to-end encrypted messaging
+
+Chat is an additive module under `/api/v1/chat` and is disabled by default.
+It reuses the current JWT authentication, SQLAlchemy engine and users. The
+backend relays ciphertext and public keys only; encryption and private-key
+storage belong to the browser.
+
+Read [the API and WebSocket contract](../docs/chat-api.md) and
+[manual database instructions](../docs/chat-database.md) before enabling it.
+The owner must execute the standalone migration manually; never reapply the
+empty-database `schema.sql` to an existing database. Set `CHAT_SCHEMA_READY`,
+`CHAT_CRYPTO_READY`, and `CHAT_ENABLED` only after the documented prerequisites
+are verified. No migration or SQL is executed automatically.
+
+The initial realtime hub requires one API worker/instance. Production requires
+HTTPS/WSS and explicit allowed origins. Run the database-free backend checks:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.venv\Scripts\python.exe -m pytest
+```
+
+Tests forbid connections to the configured database and use fake persistence.
+MSSQL migration/locking validation remains an owner-run check.

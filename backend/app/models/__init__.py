@@ -6,6 +6,13 @@ Importing this package registers every table on ``Base.metadata``.
 from app.models.base import Base
 
 from app.models.identity import PlatformRole, User, UserPlatformRole
+from app.models.chat import (
+    ChatConversation,
+    ChatDevice,
+    ChatPreKey,
+    ChatMessage,
+    ChatMessageEnvelope,
+)
 from app.models.organization import (
     Department,
     DepartmentMembership,
@@ -59,6 +66,8 @@ from app.models.job import (
 
 __all__ = [
     "Base",
+    # encrypted one-to-one messaging
+    "ChatConversation", "ChatDevice", "ChatPreKey", "ChatMessage", "ChatMessageEnvelope",
     # identity
     "User", "PlatformRole", "UserPlatformRole",
     # organization

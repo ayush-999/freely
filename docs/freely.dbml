@@ -1070,3 +1070,118 @@ Ref: saved_jobs.job_posting_id > job_postings.id
 // Example XOR rule:
 // CHECK ((organization_id IS NOT NULL AND employer_user_id IS NULL)
 //     OR (organization_id IS NULL AND employer_user_id IS NOT NULL))
+// ============================================================
+// 9. END-TO-END ENCRYPTED ONE-TO-ONE CHAT (additive)
+// See backend/database/migrations/001_chat_up.sql for executable CHECKs,
+// filtered indexes and the manual upgrade. No private keys or plaintext.
+// Existing tables and refs above retain their definitions.
+// ============================================================
+
+Table chat_conversations {
+  id bigint [not null, pk, increment]
+  public_conversation_id nvarchar(40) [not null]
+  participant_low_user_id bigint [not null]
+  participant_high_user_id bigint [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  updated_at datetime2
+
+  indexes {
+    (participant_low_user_id, participant_high_user_id) [unique, name: 'UQ_chat_conversations_pair']
+    (public_conversation_id) [unique, name: 'UQ_chat_conversations_public_id']
+    (participant_high_user_id, updated_at, id) [name: 'IX_chat_conversations_high_updated']
+    (participant_low_user_id, updated_at, id) [name: 'IX_chat_conversations_low_updated']
+  }
+  Note: 'Executable SQL checks: participant_low_user_id < participant_high_user_id; updated_at IS NULL OR updated_at >= created_at'
+}
+
+Table chat_devices {
+  id bigint [not null, pk, increment]
+  public_device_id nvarchar(40) [not null]
+  user_id bigint [not null]
+  signal_device_id int [not null]
+  registration_id int [not null]
+  protocol_version nvarchar(32) [not null]
+  identity_public_key varbinary(33) [not null]
+  label nvarchar(100)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  last_seen_at datetime2
+  revoked_at datetime2
+
+  indexes {
+    (user_id, id) [unique, name: 'UQ_chat_devices_owner_id']
+    (public_device_id) [unique, name: 'UQ_chat_devices_public_id']
+    (user_id, signal_device_id) [unique, name: 'UQ_chat_devices_user_signal_id']
+    (user_id, signal_device_id) [name: 'IX_chat_devices_active_user'] // SQL Server filter: revoked_at IS NULL
+  }
+  Note: 'Executable SQL checks: DATALENGTH(identity_public_key) = 33; last_seen_at IS NULL OR last_seen_at >= created_at; protocol_version = \'signal-pqxdh-v1\'; registration_id BETWEEN 1 AND 16383; revoked_at IS NULL OR revoked_at >= created_at; signal_device_id BETWEEN 1 AND 127'
+}
+
+Table chat_prekeys {
+  device_id bigint [not null]
+  key_kind nvarchar(32) [not null]
+  key_id int [not null]
+  protocol_version nvarchar(32) [not null]
+  public_key varbinary(1569) [not null]
+  signature varbinary(64)
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  expires_at datetime2
+  retired_at datetime2
+  claimed_at datetime2
+
+  indexes {
+    (device_id, key_kind, key_id) [pk, name: 'PK_chat_prekeys']
+    (device_id, key_kind, key_id) [name: 'IX_chat_prekeys_available'] // SQL Server filter: claimed_at IS NULL AND retired_at IS NULL
+  }
+  Note: 'Executable SQL checks: claimed_at IS NULL OR (key_kind IN (\'ec_one_time\',\'kem_one_time\') AND claimed_at >= created_at); expires_at IS NULL OR expires_at > created_at; key_id BETWEEN 0 AND 16777215; key_kind IN (\'ec_signed\',\'ec_one_time\',\'kem_one_time\',\'kem_last_resort\'); protocol_version = \'signal-pqxdh-v1\'; (key_kind = \'ec_one_time\' AND DATALENGTH(public_key) = 33 AND signature IS NULL) OR (key_kind = \'ec_signed\' AND DATALENGTH(public_key) = 33 AND signature IS NOT NULL AND DATALENGTH(signature) = 64) OR (key_kind IN (\'kem_one_time\',\'kem_last_resort\') AND DATALENGTH(public_key) = 1569 AND signature IS NOT NULL AND DATALENGTH(signature) = 64); retired_at IS NULL OR retired_at >= created_at'
+}
+
+Table chat_messages {
+  id bigint [not null, pk, increment]
+  public_message_id nvarchar(40) [not null]
+  conversation_id bigint [not null]
+  sender_user_id bigint [not null]
+  sender_device_id bigint [not null]
+  client_message_id uniqueidentifier [not null]
+  request_digest varbinary(32) [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+
+  indexes {
+    (sender_device_id, client_message_id) [unique, name: 'UQ_chat_messages_client_id']
+    (public_message_id) [unique, name: 'UQ_chat_messages_public_id']
+    (conversation_id, id) [name: 'IX_chat_messages_conversation_id']
+  }
+  Note: 'Executable SQL checks: DATALENGTH(request_digest) = 32'
+}
+
+Table chat_message_envelopes {
+  id bigint [not null, pk, increment]
+  message_id bigint [not null]
+  recipient_user_id bigint [not null]
+  recipient_device_id bigint [not null]
+  protocol_version nvarchar(32) [not null]
+  message_type int [not null]
+  ciphertext varbinary(max) [not null]
+  created_at datetime2 [not null, default: `SYSUTCDATETIME()`]
+  delivered_at datetime2
+  read_at datetime2
+
+  indexes {
+    (message_id, recipient_device_id) [unique, name: 'UQ_chat_envelopes_message_device']
+    (recipient_device_id, message_id) [name: 'IX_chat_envelopes_device_history']
+    (recipient_device_id, id) [name: 'IX_chat_envelopes_pending'] // SQL Server filter: delivered_at IS NULL
+  }
+  Note: 'Executable SQL checks: DATALENGTH(ciphertext) BETWEEN 1 AND 65536; delivered_at IS NULL OR delivered_at >= created_at; message_type IN (2,3); protocol_version = \'signal-pqxdh-v1\'; read_at IS NULL OR (delivered_at IS NOT NULL AND read_at >= delivered_at)'
+}
+
+Ref: chat_conversations.participant_high_user_id > users.id
+Ref: chat_conversations.participant_low_user_id > users.id
+Ref: chat_devices.user_id > users.id
+Ref: chat_prekeys.device_id > chat_devices.id
+Ref: chat_messages.conversation_id > chat_conversations.id
+Ref: chat_messages.(sender_user_id, sender_device_id) > chat_devices.(user_id, id)
+Ref: chat_message_envelopes.message_id > chat_messages.id
+Ref: chat_message_envelopes.(recipient_user_id, recipient_device_id) > chat_devices.(user_id, id)
+
+// Device-owner FKs above prevent mismatched owners/devices. ChatService also
+// checks sender and destination against the immutable two-user conversation.
+// Chat history and status metadata never grant administrators message access.
