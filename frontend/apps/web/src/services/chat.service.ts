@@ -9,6 +9,7 @@ import type {
   ChatConversation,
   ChatDevice,
   ChatKeyBundle,
+  ChatSummary,
   MessageAccepted,
   MessagePage,
 } from "@/types/chat"
@@ -25,8 +26,15 @@ export function createChatService(token?: string, signal?: AbortSignal) {
     async config() {
       return (await api.get<ChatConfig>(urls.config, options)).data
     },
+    async summary() {
+      return (await api.get<ChatSummary>(urls.summary, options)).data
+    },
     async conversations() {
       return (await api.get<ChatConversation[]>(urls.conversations, options))
+        .data
+    },
+    async conversation(id: string) {
+      return (await api.get<ChatConversation>(urls.conversation(id), options))
         .data
     },
     async createConversation(recipient_handle: string) {

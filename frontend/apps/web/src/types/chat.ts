@@ -2,6 +2,7 @@ import type { PeerBundle, PublicPreKey } from "@/crypto/types"
 
 export interface ChatConfig {
   enabled: boolean
+  unavailable_reason?: string | null
   protocol_version: string
   max_ciphertext_bytes: number
 }
@@ -23,6 +24,13 @@ export interface ChatConversation {
   }
   created_at: string
   updated_at: string | null
+  received_count?: number
+  unread_count?: number
+}
+
+export interface ChatSummary {
+  received_count: number
+  unread_count: number
 }
 
 export interface ChatKeyBundle {

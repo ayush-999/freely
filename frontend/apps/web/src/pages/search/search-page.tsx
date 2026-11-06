@@ -13,7 +13,7 @@ import { grievanceService } from "@/services/grievance.service"
 import { identityService } from "@/services/identity.service"
 import { jobService } from "@/services/job.service"
 import type { GrievanceTrackingView, Job, UserPublic } from "@/types"
-import { DEFAULT_AVATAR, getMediaUrl } from "@/utils/media"
+import { PersonRow } from "@/components/people/person-row"
 
 import { GrievanceRow } from "./grievance-result"
 
@@ -41,32 +41,6 @@ type TrackingResult = {
   query: string
   grievance: GrievanceTrackingView | null
   error: string | null
-}
-
-function PersonRow({ person }: { person: UserPublic }) {
-  return (
-    <Link
-      to={APP_ROUTES.user(person.user_handle)}
-      className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted/50"
-    >
-      <img
-        src={getMediaUrl(person.avatar_storage_key, DEFAULT_AVATAR)}
-        alt=""
-        className="size-11 shrink-0 rounded-full border border-border object-cover"
-      />
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold">{person.full_name}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          @{person.user_handle}
-        </p>
-        {person.bio && (
-          <p className="line-clamp-1 text-xs text-muted-foreground">
-            {person.bio}
-          </p>
-        )}
-      </div>
-    </Link>
-  )
 }
 
 function JobRow({ job }: { job: Job }) {

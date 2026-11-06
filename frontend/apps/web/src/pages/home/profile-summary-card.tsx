@@ -4,6 +4,7 @@ import { BadgeCheck } from "lucide-react"
 import { APP_ROUTES } from "@workspace/constants"
 import { Card } from "@workspace/ui/components/card"
 
+import { ProfileNetwork } from "@/components/people/profile-network"
 import { useAuth } from "@/hooks/use-auth"
 import { DEFAULT_AVATAR, DEFAULT_COVER, getMediaUrl } from "@/utils/media"
 
@@ -46,6 +47,7 @@ export function ProfileSummaryCard() {
             {user.bio}
           </p>
         )}
+        <ProfileNetwork handle={user.user_handle} compact />
       </div>
     </Card>
   )

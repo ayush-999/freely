@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 
 from app.models.chat import ChatConversation, ChatDevice, ChatMessage, ChatMessageEnvelope, ChatPreKey
 from app.models.identity import User
@@ -35,6 +35,35 @@ class ChatRepository(BaseRepository[ChatConversation]):
 
     def conversation_by_id(self, row_id: int):
         return self.db.get(ChatConversation, row_id)
+
+    def conversation_counts(self, user_id: int, conversation_ids: list[int] | None = None):
+        """Count messages once per account, independent of device fan-out.
+
+        Reading on any recipient device clears the account's unread badge.
+        Keep this metadata query independent of keys and message ciphertext.
+        """
+        if conversation_ids == []:
+            return {}
+        read_messages = select(ChatMessageEnvelope.message_id).where(
+            ChatMessageEnvelope.recipient_user_id == user_id,
+            ChatMessageEnvelope.read_at.is_not(None),
+        ).distinct().subquery()
+        stmt = select(
+            ChatMessage.conversation_id,
+            func.count(ChatMessage.id).label("received_count"),
+            func.sum(case((read_messages.c.message_id.is_(None), 1), else_=0)).label("unread_count"),
+        ).join(ChatConversation, ChatConversation.id == ChatMessage.conversation_id).outerjoin(
+            read_messages, read_messages.c.message_id == ChatMessage.id,
+        ).where(
+            or_(ChatConversation.participant_low_user_id == user_id, ChatConversation.participant_high_user_id == user_id),
+            ChatMessage.sender_user_id != user_id,
+        )
+        if conversation_ids is not None:
+            stmt = stmt.where(ChatMessage.conversation_id.in_(conversation_ids))
+        return {
+            row.conversation_id: (row.received_count, row.unread_count)
+            for row in self.db.execute(stmt.group_by(ChatMessage.conversation_id))
+        }
 
     def devices(self, user_id: int, *, active_only: bool = True):
         stmt = select(ChatDevice).where(ChatDevice.user_id == user_id)

@@ -33,14 +33,16 @@ registration identifiers. Existing ratchets keep working after reopening the
 vault. A new session still requires a valid current bundle; incomplete directory
 records never bypass identity checks or invalid supplied signatures.
 
-Every sender must have a pinned signed bundle before decryption. Changed public
-identity, account, device number or registration ID is rejected. New devices are
-unverified until their 60-digit library safety number is compared out of band.
-The UI must not mark a device verified merely because its directory record was
-downloaded. Sending requires all destination devices to be verified. Receiving
-from a first-use pinned but unverified device is allowed and remains visibly
-unverified. Identity replacement uses explicit device revocation/registration
-and new peer verification, rather than silently overwriting the old pin.
+Every sender must have a pinned signed bundle before decryption. New device
+bundles are validated and pinned automatically on first use, with no manual
+safety-number entry or verification panel. Encryption and decryption continue
+to validate signed public keys and reject changes to a previously pinned public
+identity, account, device number or registration ID. A newly registered device
+with its own public ID is accepted automatically after validation. Existing
+`verified: false` archive records remain usable; the legacy manual-assurance
+marker is preserved for compatibility and is not used to block delivery or
+silently changed to true. Existing identity pins are never overwritten by an
+incompatible directory record.
 
 This hydration behavior is covered by actual browser tests, including changed
 identity rejection and replay rejection after reopening the vault. It is still
@@ -56,6 +58,20 @@ with browser WebCrypto AES-256-GCM using a fresh 96-bit random nonce for each
 write and account-specific authenticated data. A nonextractable CryptoKey is
 stored by IndexedDB structured cloning. No private record goes into
 localStorage, Redux, HTTP/WebSocket DTOs or backend storage.
+
+Pressing Send first seals an outgoing history entry with status `pending`, even
+when the recipient has no published device or connectivity is unavailable. This is
+a local queue, distinct from the immutable encrypted-envelope outbox. A pending
+entry survives reloads and is shown as Queued rather than Sent. Preparing it later
+retains its client UUID and history entry, validates destination identities, and
+atomically adds ciphertext to the outbox. Conflicting reuse of a UUID is rejected.
+Local-only messages do not affect server received or unread counts.
+
+One controller runs per authenticated app session, so users register their own
+device on any route and queued processing continues after navigation. The active
+conversation's decrypted view is cleared when leaving Messaging. Logging out
+stops transport, polling and the vault; sealed queues resume in that browser on
+the next authenticated session.
 
 Every read/mutation obtains an account-specific Web Lock, reads a fresh sealed
 snapshot, and hydrates temporary library stores. Sending commits advanced
@@ -118,19 +134,22 @@ against malicious frontend code, same-origin XSS with key-use access, a
 compromised browser/device or rollback of local browser data by an attacker
 controlling the profile. A nonextractable wrapping key does not prevent hostile
 same-origin code from requesting decryption. The backend still observes routing,
-timing, device, presence and receipt metadata. Verification must occur outside
-the potentially malicious relay to authenticate first use.
+timing, device, presence and receipt metadata. Automatic first-use trust depends
+on the directory's initial device identity; it is not an independent out-of-band
+authentication of that first identity. Subsequent mismatches remain rejected.
 
 ## Tests actually executed
 
-On 4–5 November 2026, actual Chrome/Chromium, Firefox 157 and Playwright WebKit
-27.2 runs passed:
+The original implementation passed actual Chrome/Chromium, Firefox 157 and
+Playwright WebKit 27.2 runs on 4–5 November 2026. On 6 November 2026, Chromium
+and the official native peer also passed the updated direct-delivery flow.
+Coverage includes:
 
 - Encrypted Unicode/emoji roundtrip, out-of-order messages and signed-prekey
   signature rejection.
-- Safety-number agreement, sending blocked before verification, persisted
-  verification/identity/history after vault reopening, and changed identity
-  rejection after reopening.
+- Safety-number agreement, automatic first-use encrypted delivery, legacy
+  unverified archive recovery, persisted identity/history after vault reopening,
+  and changed identity rejection after reopening.
 - Duplicate/replay rejection after reopening, encrypted vault inspection,
   original outbox ciphertext reuse, monotonic receipts and closed-vault guards.
 - Established-session operation after live directory prekey expiry, with

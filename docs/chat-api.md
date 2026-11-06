@@ -19,11 +19,15 @@ CHAT_WORKER_COUNT=1
 The owner first reviews and manually executes `database/migrations/001_chat_up.sql`
 against the existing MSSQL database, verifies it, and validates the pinned browser
 crypto release. Set the readiness flags and enable chat only after those steps.
-Editing `schema.sql` does not update the running database. No SQL was executed
-while implementing or testing this module.
+Editing `schema.sql` does not update the running database. Unit tests do not
+connect to a database. On 5 November 2026, a separate read-only local check
+confirmed the existing five chat tables, expected columns, nullability and named
+constraints/indexes, and the account-count query. Local readiness flags were
+then enabled without running DDL. Restart the backend after changing `.env`.
 
 `GET /config` is DB-free and reports `{enabled, protocol_version,
-max_ciphertext_bytes, max_devices_per_user}`. Other chat endpoints return 503
+max_ciphertext_bytes, max_devices_per_user, unavailable_reason}`. The nullable
+`unavailable_reason` explains the first incomplete setup flag. Other chat endpoints return 503
 while disabled/not marked ready. Storage failures produce a redacted chat-only
 503; they do not cause unrelated routes to query the new tables at startup.
 
@@ -80,6 +84,7 @@ and key bundles are plain arrays. Message lists use a page object.
 | Method/path | Request | Response / rules |
 | --- | --- | --- |
 | `GET /config` | None | DB-free feature and protocol configuration. |
+| `GET /summary` | Bearer | `{received_count, unread_count}` across all owned conversations, independent of conversation pagination. |
 | `GET /conversations?limit=50&offset=0` | Bearer | Owned conversations only; maximum 100 per page. |
 | `POST /conversations` | `{recipient_handle}` | Create/reuse canonical one-to-one pair; self-chat/inactive recipients rejected. |
 | `GET /conversations/{public_id}` | Bearer | Owned conversation; unrelated/missing IDs both return 404. |
@@ -95,7 +100,14 @@ and key bundles are plain arrays. Message lists use a page object.
 | `POST /messages/{public_id}/receipts` | `{public_device_id,status:'delivered'|'read'}` | Only the original destination device may acknowledge; timestamps never regress. |
 
 Conversation objects contain `public_conversation_id`, `peer:{user_handle,
-full_name,avatar_storage_key}`, `created_at`, and `updated_at`.
+full_name,avatar_storage_key}`, `created_at`, `updated_at`, `received_count`, and
+`unread_count`. Counts are for the authenticated recipient's incoming messages;
+sent messages and copies synchronized to the sender's other devices are
+excluded. Each message counts once even when delivered to multiple devices.
+Delivery alone keeps it unread; an explicit read receipt on any recipient
+device clears it from that account's unread count. Total received counts remain
+available after reading. The summary endpoint applies the same rules across
+all conversations without exposing content or requiring a messaging device.
 
 Device objects contain `public_device_id`, `user_handle`, `signal_device_id`,
 `registration_id`, `protocol_version`, `identity_public_key`, `label`, `created_at`,
@@ -236,17 +248,18 @@ key-claim checks remain required before activation.
 
 ### Browser integration through the actual relay
 
-On 5 November 2026, `tests/chat-ui/relay-tests.mjs` passed with real browser
+On 6 November 2026, `tests/chat-ui/relay-tests.mjs` passed with real browser
 Signal encryption, the real React screens, and actual FastAPI HTTP/native
 WebSocket requests. API/socket interception was not used. The dedicated test
 backend uses the real chat router, service and JWT resolver with explicitly fake
 persistence; engine and dialect connections raise immediately. Its state reported
 two messages, two encrypted envelopes and zero attempted database connections.
 
-The run verified device/key upload and claim DTOs, matching safety numbers and
-mutual verification, emoji composition, safe script-text rendering, ciphertext-only
-chat requests, realtime reception/read receipts, native WebSocket reconnection,
-trust/history after reload, encrypted replies and a 390 px responsive viewport.
+The run verified device/key upload and claim DTOs, automatic first-use encrypted
+delivery without manual verification controls, emoji composition, safe script-text
+rendering, ciphertext-only chat requests, received-message totals, realtime
+reception/read receipts, native WebSocket reconnection, trust/history after reload,
+encrypted replies and a 390 px responsive viewport.
 No API errors or browser page errors occurred. This still does not validate
 MSSQL locking or execute the migration.
 

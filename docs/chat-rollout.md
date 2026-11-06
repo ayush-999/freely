@@ -5,6 +5,10 @@ existing React/FastAPI application and remains **disabled by default**. No SQL,
 migration, database connectivity probe or live application query was executed.
 Existing database contents have not been inspected or changed.
 
+Client update, 6 November 2026: direct encrypted delivery now uses automatic
+signed-bundle validation and identity pinning. The manual device-verification
+screen and its queue gate have been removed, including for existing archives.
+
 ## Deliverables
 
 - [Updated complete schema](../backend/database/schema.sql): the original 47
@@ -21,10 +25,12 @@ Signal APIs restore durable identity pins through a tested temporary-session
 hydration adapter; no custom protocol or cryptographic algorithm was added.
 Native libsignal is a test peer only. Private keys and plaintext are confined
 to the browser; backend DTOs/storage relay ciphertext and public material.
-Chat's transient view state uses a page-scoped controller and React's existing
-subscription API. The existing Redux authentication remains authoritative;
+Chat's transient state uses one controller per authenticated app session and
+React's existing subscription API. The existing Redux authentication remains authoritative;
 no second store or state-management dependency was introduced, and decrypted
-history stays out of Redux developer tools.
+history stays out of Redux developer tools. Leaving Messaging clears the selected
+conversation from memory while device registration, incoming delivery and queued
+sends continue for the authenticated session.
 
 ## Manual database execution
 
@@ -96,10 +102,23 @@ closed while any readiness flag is false. A missing migration produces a
 redacted chat-specific storage error without changing unrelated routes.
 
 Open **Messaging** in the existing navigation, find a person, and open their
-conversation. Both people must first open Messaging to register browser devices.
-Compare each destination device's safety number over a trusted independent
-channel and enter the matching number to enable sending. New devices require
-verification. History is stored in a separate encrypted local archive; a new
+conversation. You can compose and press Send immediately, including before the
+recipient registers a device. A pending message appears in the conversation and
+is saved in the encrypted browser archive across reloads. The UI distinguishes
+local queueing from server acceptance and received-message counts; queued local
+messages do not increase the recipient's received or unread total.
+
+Signed-in users register messaging devices automatically on any app page. If a
+recipient has not signed in on a supported browser yet, messages wait locally.
+New recipient and own-device bundles are validated and pinned automatically;
+there is no manual device verification or safety-number entry. Existing queued
+messages, including those previously blocked by an unverified device record,
+retry automatically when destinations and connectivity are ready, even after
+navigating away from Messaging. Unprepared plaintext never leaves the sealed local archive;
+the server still receives only encrypted envelopes. Closing the app pauses local
+queue processing until this browser's authenticated session resumes.
+
+History is stored in a separate encrypted local archive; a new
 browser cannot automatically decrypt another device's old messages.
 Delayed initial session messages require the receiving device's retained private
 prekeys; the documented retention window is 30 days. Expired initial-session
@@ -149,7 +168,7 @@ npm run test:chat-ui
 The UI runner installs interception before navigating either browser context.
 Every application API/WebSocket is mocked; unknown API routes receive an error
 and never fall through to the running backend. It exercises real browser crypto,
-search, conversation creation, safety verification, emoji composition, literal
+search, conversation creation, direct encrypted delivery, emoji composition, literal
 markup rendering, ciphertext-only transport, delivery/read state, reconnect,
 reload and responsive width. Desktop/mobile screenshots are written under the
 ignored `.tools/chat-ui` directory.
@@ -192,6 +211,6 @@ was applied. These findings remain an explicit dependency-maintenance item.
 Single-worker delivery/presence/rate state is the supported initial deployment.
 Multiple workers/hosts require a shared broker and distributed state. Browser
 E2EE cannot protect compromised devices or malicious same-origin frontend code;
-verification of first use must happen outside the relay. Revocation prevents
+first-use identity trust depends on the initial directory record. Revocation prevents
 future server access and cannot erase previously decrypted content. Backups and
 runtime SQL permissions must be restricted; runtime accounts need no DDL grants.

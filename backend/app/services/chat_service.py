@@ -12,7 +12,7 @@ from app.models.chat import ChatConversation, ChatDevice, ChatMessage, ChatMessa
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.chat import (
     PROTOCOL_VERSION, ConversationPublic, DevicePublic, KeyBundle, MessageAccepted,
-    MessagePage, MessageView, PeerPublic, PreKeyPublic, ReceiptPublic, decode_blob, encode_blob,
+    MessagePage, MessageSummary, MessageView, PeerPublic, PreKeyPublic, ReceiptPublic, decode_blob, encode_blob,
 )
 from app.services.base import BaseService
 from app.utils import utcnow
@@ -49,12 +49,16 @@ class ChatService(BaseService):
             raise NotFoundError("Conversation peer not found")
         return peer
 
-    def _conversation_public(self, user_id: int, conversation):
+    def _conversation_public(self, user_id: int, conversation, counts=None):
         peer = self._peer(user_id, conversation)
+        if counts is None:
+            counts = self.repo.conversation_counts(user_id, [conversation.id])
+        received, unread = counts.get(conversation.id, (0, 0))
         return ConversationPublic(
             public_conversation_id=conversation.public_conversation_id,
             peer=PeerPublic(user_handle=peer.user_handle, full_name=peer.full_name, avatar_storage_key=peer.avatar_storage_key),
             created_at=conversation.created_at, updated_at=conversation.updated_at,
+            received_count=received, unread_count=unread,
         )
 
     def device_public(self, device, *, include_counts=False):
@@ -70,7 +74,16 @@ class ChatService(BaseService):
         )
 
     def list_conversations(self, user, limit=50, offset=0):
-        return [self._conversation_public(user.id, row) for row in self.repo.conversations(user.id, limit, offset)]
+        rows = self.repo.conversations(user.id, limit, offset)
+        counts = self.repo.conversation_counts(user.id, [row.id for row in rows])
+        return [self._conversation_public(user.id, row, counts) for row in rows]
+
+    def message_summary(self, user):
+        counts = self.repo.conversation_counts(user.id)
+        return MessageSummary(
+            received_count=sum(received for received, _ in counts.values()),
+            unread_count=sum(unread for _, unread in counts.values()),
+        )
 
     def get_conversation(self, user, public_id):
         return self._conversation_public(user.id, self.require_conversation(user.id, public_id))

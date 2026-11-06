@@ -24,7 +24,7 @@ from app.models.identity import User
 from app.schemas.chat import (
     MAX_CIPHERTEXT_BYTES, PROTOCOL_VERSION, ConversationCreate, ConversationPublic,
     DeviceAction, DevicePublic, DeviceRegister, KeyBundle, KeyClaim, KeysUpload, MessageAccepted,
-    MessagePage, MessageSend, ReceiptInput, ReceiptPublic, SocketAuth, SocketEvent,
+    MessagePage, MessageSend, MessageSummary, ReceiptInput, ReceiptPublic, SocketAuth, SocketEvent,
     TypingInput,
 )
 from app.services.chat_service import ChatService
@@ -84,9 +84,17 @@ router = APIRouter(prefix="/chat", route_class=ChatRoute)
 
 @router.get("/config")
 def chat_config():
+    unavailable_reason = None
+    if not settings.chat_schema_ready:
+        unavailable_reason = "Messaging setup is incomplete. Apply the chat database migration and enable CHAT_SCHEMA_READY on the server."
+    elif not settings.chat_crypto_ready:
+        unavailable_reason = "Messaging setup is incomplete. Validate the encryption build and enable CHAT_CRYPTO_READY on the server."
+    elif not settings.chat_enabled:
+        unavailable_reason = "Messaging is switched off. Enable CHAT_ENABLED on the server to start conversations."
     return {"enabled": chat_ready(), "protocol_version": PROTOCOL_VERSION,
             "max_ciphertext_bytes": MAX_CIPHERTEXT_BYTES,
-            "max_devices_per_user": settings.chat_max_devices_per_user}
+            "max_devices_per_user": settings.chat_max_devices_per_user,
+            "unavailable_reason": unavailable_reason}
 
 
 def chat_db(_=Depends(require_chat_enabled)):
@@ -106,6 +114,11 @@ def chat_user(request: Request, db: Session = Depends(chat_db), token: str = Dep
 
 def service(db: Session = Depends(chat_db)):
     return ChatService(db, max_devices=settings.chat_max_devices_per_user)
+
+
+@router.get("/summary", response_model=MessageSummary)
+def message_summary(current: User = Depends(chat_user), chat: ChatService = Depends(service)):
+    return chat.message_summary(current)
 
 
 @router.get("/conversations", response_model=list[ConversationPublic])

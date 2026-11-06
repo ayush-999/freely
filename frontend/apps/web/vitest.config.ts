@@ -9,6 +9,10 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
   },
   test: {
+    // Keep Radix's React imports in Vite's deduplicated module graph. Native
+    // externalization can otherwise load another React instance through a
+    // differently cased Windows workspace path.
+    server: { deps: { inline: [/@radix-ui\//] } },
     environment: "jsdom",
     include: ["tests/unit/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/unit/setup.ts"],

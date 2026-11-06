@@ -127,6 +127,28 @@ def test_receipts_are_explicit_monotonic_and_destination_scoped(world):
     assert delivered.status == "read"
 
 
+def test_account_counts_deduplicate_devices_and_clear_after_read(world):
+    _, service, (alice, bob, mallory), devices, conversation = world
+    extra = service.register_device(bob, registration(2, 9))
+    data = message(world)
+    data.envelopes.append(type(data.envelopes[0])(
+        recipient_device_id=extra.public_device_id, ciphertext=encode_blob(b"other-device"), message_type=3,
+    ))
+    accepted, _ = service.send_message(alice, data)
+    # Retrying and device fan-out must never inflate the account badge.
+    service.send_message(alice, data)
+    listed = service.list_conversations(bob)[0]
+    assert (listed.received_count, listed.unread_count) == (1, 1)
+    assert service.message_summary(bob).model_dump() == {"received_count": 1, "unread_count": 1}
+    assert service.message_summary(alice).model_dump() == {"received_count": 0, "unread_count": 0}
+    assert service.message_summary(mallory).model_dump() == {"received_count": 0, "unread_count": 0}
+    service.receipt(bob, accepted.public_message_id, ReceiptInput(public_device_id=devices[1].public_device_id, status="delivered"))
+    assert service.message_summary(bob).unread_count == 1
+    service.receipt(bob, accepted.public_message_id, ReceiptInput(public_device_id=extra.public_device_id, status="read"))
+    assert service.message_summary(bob).model_dump() == {"received_count": 1, "unread_count": 0}
+    assert service.get_conversation(bob, conversation.public_conversation_id).unread_count == 0
+
+
 def test_revocation_never_recycles_identity_or_accepts_old_device(world):
     _, service, (alice, _, _), devices, _ = world
     same = service.register_device(alice, registration())
@@ -242,6 +264,25 @@ def test_http_auth_conversation_send_and_offline_retrieval(client, world):
     assert pending.status_code == 200 and len(pending.json()["items"]) == 1
 
 
+def test_http_summary_is_authenticated_account_scoped_and_tracks_read(client, world):
+    _, _, _, devices, conversation = world
+    alice = {"Authorization": f"Bearer {client.tokens[0]}"}
+    bob = {"Authorization": f"Bearer {client.tokens[1]}"}
+    other = {"Authorization": f"Bearer {client.tokens[2]}"}
+    assert client.get("/api/v1/chat/summary").status_code == 401
+    sent = client.post("/api/v1/chat/messages", headers=alice, json=message(world).model_dump(mode="json"))
+    assert sent.status_code == 200
+    assert client.get("/api/v1/chat/summary", headers=bob).json() == {"received_count": 1, "unread_count": 1}
+    assert client.get("/api/v1/chat/summary", headers=alice).json() == {"received_count": 0, "unread_count": 0}
+    assert client.get("/api/v1/chat/summary", headers=other).json() == {"received_count": 0, "unread_count": 0}
+    conversation_data = client.get(f"/api/v1/chat/conversations/{conversation.public_conversation_id}", headers=bob).json()
+    assert conversation_data["received_count"] == 1 and conversation_data["unread_count"] == 1
+    receipt = client.post(f"/api/v1/chat/messages/{sent.json()['public_message_id']}/receipts", headers=bob,
+                          json={"public_device_id": devices[1].public_device_id, "status": "read"})
+    assert receipt.status_code == 200
+    assert client.get("/api/v1/chat/summary", headers=bob).json() == {"received_count": 1, "unread_count": 0}
+
+
 def test_http_redacts_invalid_inputs_and_disabled_readiness(client, monkeypatch):
     from app.controllers import chat_controller as controller
 
@@ -250,6 +291,7 @@ def test_http_redacts_invalid_inputs_and_disabled_readiness(client, monkeypatch)
     assert response.status_code == 422 and secret not in response.text
     monkeypatch.setattr(controller.settings, "chat_crypto_ready", False)
     assert client.get("/api/v1/chat/config").json()["enabled"] is False
+    assert "CHAT_CRYPTO_READY" in client.get("/api/v1/chat/config").json()["unavailable_reason"]
     # Clear DB dependency override to exercise the actual gate before auth/SQL.
     from app.main import app
     app.dependency_overrides.pop(controller.chat_db)

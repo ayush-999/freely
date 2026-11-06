@@ -9,11 +9,13 @@ export function MessageComposer({
   busy,
   onSend,
   onTyping,
+  disabledReason,
 }: {
   disabled: boolean
   busy: boolean
   onSend: (text: string) => Promise<boolean>
   onTyping: (active: boolean) => void
+  disabledReason?: string
 }) {
   const [text, setText] = useState("")
   const field = useRef<HTMLTextAreaElement>(null)
@@ -29,68 +31,70 @@ export function MessageComposer({
       onSubmit={(event) => {
         void submit(event)
       }}
-      className="border-t p-3"
+      className="shrink-0 border-t bg-card px-3 py-3 md:px-5"
     >
       <label className="sr-only" htmlFor="chat-message">
         Message
       </label>
-      <Textarea
-        id="chat-message"
-        ref={field}
-        rows={2}
-        maxLength={8000}
-        value={text}
-        disabled={disabled || busy}
-        placeholder={
-          disabled ? "Verify all devices to send a message" : "Write a message…"
-        }
-        className="max-h-40 min-h-20 resize-y border-0 bg-muted/40"
-        onChange={(event) => {
-          setText(event.target.value)
-          onTyping(!!event.target.value.trim())
-        }}
-        onBlur={() => onTyping(false)}
-        onKeyDown={(event) => {
-          if (
-            event.key === "Enter" &&
-            !event.shiftKey &&
-            !event.nativeEvent.isComposing
-          ) {
-            event.preventDefault()
-            event.currentTarget.form?.requestSubmit()
+      <div className="flex items-end gap-2 rounded-2xl border bg-background/60 p-2">
+        {!disabled && (
+          <EmojiPicker
+            align="left"
+            onSelect={(emoji) => {
+              const next = insertAtSelection(field.current, text, emoji)
+              if (next.value.length > 8000) return
+              setText(next.value)
+              onTyping(true)
+              requestAnimationFrame(() => {
+                field.current?.focus()
+                field.current?.setSelectionRange(next.caret, next.caret)
+              })
+            }}
+          />
+        )}
+        <Textarea
+          id="chat-message"
+          ref={field}
+          rows={1}
+          maxLength={8000}
+          value={text}
+          disabled={disabled || busy}
+          placeholder={
+            disabled
+              ? (disabledReason ?? "Messaging is connecting…")
+              : "Write a message…"
           }
-        }}
-      />
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {!disabled && (
-            <EmojiPicker
-              align="left"
-              onSelect={(emoji) => {
-                const next = insertAtSelection(field.current, text, emoji)
-                if (next.value.length > 8000) return
-                setText(next.value)
-                onTyping(true)
-                requestAnimationFrame(() => {
-                  field.current?.focus()
-                  field.current?.setSelectionRange(next.caret, next.caret)
-                })
-              }}
-            />
-          )}
-          <span className="text-xs text-muted-foreground">
-            Shift + Enter for a new line
-          </span>
-        </div>
+          className="max-h-28 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent"
+          onChange={(event) => {
+            setText(event.target.value)
+            onTyping(!!event.target.value.trim())
+          }}
+          onBlur={() => onTyping(false)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault()
+              event.currentTarget.form?.requestSubmit()
+            }
+          }}
+        />
         <Button
           type="submit"
           disabled={disabled || busy || !text.trim()}
           size="sm"
+          className="size-9 shrink-0 rounded-xl bg-fuchsia-600 text-white hover:bg-fuchsia-700"
+          aria-label={busy ? "Sending…" : "Send"}
         >
           <Send className="size-4" />
-          {busy ? "Sending…" : "Send"}
+          <span className="sr-only">{busy ? "Sending…" : "Send"}</span>
         </Button>
       </div>
+      <p className="mt-2 text-center text-[10px] text-muted-foreground">
+        Shift + Enter for a new line
+      </p>
     </form>
   )
 }

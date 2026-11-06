@@ -6,6 +6,7 @@
 export const API_ENDPOINTS = {
   chat: {
     config: "/chat/config",
+    summary: "/chat/summary",
     conversations: "/chat/conversations",
     conversation: (id: string) =>
       `/chat/conversations/${encodeURIComponent(id)}`,
@@ -36,6 +37,14 @@ export const API_ENDPOINTS = {
     handleAvailability: (handle: string) =>
       `/users/handle-availability?handle=${encodeURIComponent(handle)}`,
     publicProfile: (handle: string) => `/users/${encodeURIComponent(handle)}`,
+    relationships: (handle: string) =>
+      `/users/${encodeURIComponent(handle)}/relationships`,
+    followers: (handle: string) =>
+      `/users/${encodeURIComponent(handle)}/followers`,
+    following: (handle: string) =>
+      `/users/${encodeURIComponent(handle)}/following`,
+    followByHandle: (handle: string) =>
+      `/users/${encodeURIComponent(handle)}/relationships/follow`,
     grantPlatformRole: (userId: number) =>
       `/admin/users/${userId}/platform-roles`,
   },

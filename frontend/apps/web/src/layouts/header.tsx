@@ -24,6 +24,7 @@ import { cn } from "@workspace/ui/lib/utils"
 import { AiVoiceTicker } from "@/components/ai/ai-voice-ticker"
 import { ModeToggle } from "@/components/mode-toggle"
 import { useAuth } from "@/hooks/use-auth"
+import { useUnreadMessages } from "@/hooks/use-unread-messages"
 
 import { MORE_ITEMS, MoreMenu } from "./more-menu"
 import { NavItemLink, type NavItem } from "./nav-link-item"
@@ -90,7 +91,10 @@ interface HeaderProps {
 }
 
 export function Header({ onOpenTelemetry }: HeaderProps) {
-  const { isAuthenticated, logout } = useAuth()
+  const { isAuthenticated, logout, user } = useAuth()
+  const unreadMessages = useUnreadMessages(
+    isAuthenticated ? user?.user_handle : undefined
+  )
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -119,7 +123,13 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
             {isAuthenticated && (
               <>
                 {AUTH_NAV_ITEMS.map((item) => (
-                  <NavItemLink key={item.to} item={item} />
+                  <NavItemLink
+                    key={item.to}
+                    item={item}
+                    unreadCount={
+                      item.to === APP_ROUTES.messaging ? unreadMessages : 0
+                    }
+                  />
                 ))}
                 <MoreMenu onLogout={handleLogout} />
               </>
@@ -127,6 +137,15 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
           </nav>
 
           <div className="flex items-center gap-2">
+            {isAuthenticated && (
+              <div className="md:hidden">
+                <NavItemLink
+                  item={AUTH_NAV_ITEMS[1]!}
+                  unreadCount={unreadMessages}
+                  iconOnly
+                />
+              </div>
+            )}
             {!isAuthenticated && (
               // The home page's left card already offers log in / sign up on lg+.
               <div
@@ -191,6 +210,9 @@ export function Header({ onOpenTelemetry }: HeaderProps) {
                     <NavItemLink
                       key={item.to}
                       item={item}
+                      unreadCount={
+                        item.to === APP_ROUTES.messaging ? unreadMessages : 0
+                      }
                       onClick={() => setMobileMenuOpen(false)}
                     />
                   ))}

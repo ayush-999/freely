@@ -146,7 +146,7 @@ export class SignalEngine {
         previous.bundle.registration_id !== bundle.registration_id)
     ) {
       throw new Error(
-        "This device's identity changed. Verify the new identity before continuing."
+        "This device's encryption identity changed unexpectedly. Delivery is paused for this device."
       )
     }
     const hasEc = key(bundle, "ec_signed")

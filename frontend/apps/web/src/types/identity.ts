@@ -40,11 +40,11 @@ export interface UserMe extends UserPublic {
 
 export interface UserUpdateRequest {
   full_name?: string
-  bio?: string
-  avatar_storage_key?: string
-  cover_storage_key?: string
-  website_url?: string
-  preferred_language?: string
+  bio?: string | null
+  avatar_storage_key?: string | null
+  cover_storage_key?: string | null
+  website_url?: string | null
+  preferred_language?: string | null
 }
 
 export interface PlatformRoleGrantRequest {

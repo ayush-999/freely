@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "vitest run --config vitest.config.ts",
     "test:crypto": "node tests/crypto/browser-tests.mjs",
-    "test:chat-ui": "node tests/chat-ui/browser-tests.mjs"
+    "test:chat-ui": "node tests/chat-ui/browser-tests.mjs",
+    "test:profile-ui": "node tests/profile-ui/browser-tests.mjs"
   },
   "dependencies": {
     "@getmaapp/signal-wasm": "0.6.6",

@@ -4,6 +4,7 @@ import { Outlet } from "react-router-dom"
 import { AiTelemetryModal } from "@/components/ai/ai-telemetry-modal"
 import { AiVoiceCopilot } from "@/components/ai/ai-voice-copilot"
 import { ComingSoonModal } from "@/components/coming-soon-modal"
+import { ChatSessionProvider } from "@/components/chat/chat-session-provider"
 import { config } from "@/config/config"
 import { Footer } from "@/layouts/footer"
 import { Header } from "@/layouts/header"
@@ -27,29 +28,31 @@ export function RootLayout() {
   }, [])
 
   return (
-    <div className="flex min-h-svh flex-col bg-background selection:bg-primary/20 selection:text-primary">
-      <Header onOpenTelemetry={handleOpenTelemetry} />
+    <ChatSessionProvider>
+      <div className="flex min-h-svh flex-col bg-background selection:bg-primary/20 selection:text-primary">
+        <Header onOpenTelemetry={handleOpenTelemetry} />
 
-      {/* Main Page Outlet */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-        <Outlet />
-      </main>
+        {/* Main Page Outlet */}
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+          <Outlet />
+        </main>
 
-      {/* Floating Interactive AI Voice Copilot Widget */}
-      <AiVoiceCopilot />
+        {/* Floating Interactive AI Voice Copilot Widget */}
+        <AiVoiceCopilot />
 
-      {/* AI Telemetry Diagnostics Modal */}
-      <AiTelemetryModal
-        isOpen={isTelemetryOpen}
-        onClose={() => setIsTelemetryOpen(false)}
-      />
+        {/* AI Telemetry Diagnostics Modal */}
+        <AiTelemetryModal
+          isOpen={isTelemetryOpen}
+          onClose={() => setIsTelemetryOpen(false)}
+        />
 
-      <ComingSoonModal
-        isOpen={isComingSoonOpen}
-        onClose={() => setIsComingSoonOpen(false)}
-      />
+        <ComingSoonModal
+          isOpen={isComingSoonOpen}
+          onClose={() => setIsComingSoonOpen(false)}
+        />
 
-      <Footer apiOk={apiOk} onOpenTelemetry={handleOpenTelemetry} />
-    </div>
+        <Footer apiOk={apiOk} onOpenTelemetry={handleOpenTelemetry} />
+      </div>
+    </ChatSessionProvider>
   )
 }

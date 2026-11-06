@@ -359,6 +359,48 @@ class UserFollowRepository(BaseRepository[UserFollow]):
     def get_pair(self, follower_id: int, followed_id: int) -> Optional[UserFollow]:
         return self.db.get(UserFollow, (follower_id, followed_id))
 
+    @staticmethod
+    def _people_query(user_id: int, direction: str):
+        """Resolve either side of the existing follow edge to active users."""
+        if direction == "followers":
+            person_id = UserFollow.follower_user_id
+            target = UserFollow.followed_user_id
+        else:
+            person_id = UserFollow.followed_user_id
+            target = UserFollow.follower_user_id
+        return (
+            select(User)
+            .join(UserFollow, person_id == User.id)
+            .where(target == user_id, User.is_active == True)
+        )
+
+    def count_people(self, user_id: int, direction: str) -> int:
+        people = self._people_query(user_id, direction).with_only_columns(User.id).subquery()
+        return self.db.scalar(select(func.count()).select_from(people)) or 0
+
+    def people(self, user_id: int, direction: str, limit: int, offset: int) -> list[User]:
+        statement = self._people_query(user_id, direction).order_by(
+            UserFollow.created_at.desc(), User.id.desc()
+        ).offset(offset).limit(limit)
+        return list(self.db.scalars(statement))
+
+    def viewer_pairs(self, viewer_id: int, user_ids: list[int]) -> set[tuple[int, int]]:
+        if not user_ids:
+            return set()
+        statement = select(UserFollow.follower_user_id, UserFollow.followed_user_id).where(
+            or_(
+                and_(UserFollow.follower_user_id == viewer_id, UserFollow.followed_user_id.in_(user_ids)),
+                and_(UserFollow.followed_user_id == viewer_id, UserFollow.follower_user_id.in_(user_ids)),
+            )
+        )
+        return {(row[0], row[1]) for row in self.db.execute(statement)}
+
+    def remove_pair(self, follower_id: int, followed_id: int) -> None:
+        self.db.execute(delete(UserFollow).where(
+            UserFollow.follower_user_id == follower_id,
+            UserFollow.followed_user_id == followed_id,
+        ))
+
 
 class HashtagRepository(BaseRepository[Hashtag]):
     model = Hashtag

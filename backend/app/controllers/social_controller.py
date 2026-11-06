@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, get_optional_user
 from app.models.identity import User
-from app.schemas.common import MessageResponse
+from app.schemas.common import MessageResponse, Page
 from app.schemas.social import (
     CollectionCreateRequest,
     CollectionResponse,
@@ -23,6 +23,8 @@ from app.schemas.social import (
     PostUpdateRequest,
     ProfilePostResponse,
     RepostRequest,
+    RelationshipPersonResponse,
+    UserRelationshipResponse,
     SavedPostResponse,
     TrendingHashtag,
 )
@@ -326,6 +328,70 @@ def toggle_comment_like(
 ):
     liked = SocialService(db).toggle_comment_like(current, comment_id)
     return MessageResponse(message="liked" if liked else "unliked")
+
+
+@router.get(
+    "/users/{handle}/relationships", response_model=UserRelationshipResponse,
+    summary="Public follower/following counts and viewer relationship",
+)
+def user_relationship(
+    handle: str,
+    db: Session = Depends(get_db),
+    current: Optional[User] = Depends(get_optional_user),
+):
+    return SocialService(db).relationship(current, handle)
+
+
+@router.get(
+    "/users/{handle}/followers", response_model=Page[RelationshipPersonResponse],
+    summary="Active followers with public profiles and viewer relationship",
+)
+def user_followers(
+    handle: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current: Optional[User] = Depends(get_optional_user),
+):
+    return SocialService(db).relationship_people(current, handle, "followers", limit, offset)
+
+
+@router.get(
+    "/users/{handle}/following", response_model=Page[RelationshipPersonResponse],
+    summary="Active followed users with public profiles and viewer relationship",
+)
+def user_following(
+    handle: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current: Optional[User] = Depends(get_optional_user),
+):
+    return SocialService(db).relationship_people(current, handle, "following", limit, offset)
+
+
+@router.put(
+    "/users/{handle}/relationships/follow", response_model=UserRelationshipResponse,
+    summary="Follow an active user by handle (idempotent)",
+)
+def follow_user(
+    handle: str,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    return SocialService(db).set_follow(current, handle, True)
+
+
+@router.delete(
+    "/users/{handle}/relationships/follow", response_model=UserRelationshipResponse,
+    summary="Unfollow a user by handle (idempotent)",
+)
+def unfollow_user(
+    handle: str,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    return SocialService(db).set_follow(current, handle, False)
 
 
 @router.post("/users/{user_id}/follow", response_model=MessageResponse, summary="Follow / unfollow")

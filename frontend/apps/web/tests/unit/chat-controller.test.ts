@@ -157,7 +157,7 @@ function createVault() {
     acceptPeer: vi.fn(async (bundle: PeerBundle) => ({
       public_device_id: bundle.public_device_id,
       user_handle: bundle.user_handle,
-      verified: true,
+      verified: false,
       safety_number: "1".repeat(60),
     })),
     verifyPeer: vi.fn(async () => undefined),
@@ -186,25 +186,12 @@ function createVault() {
       archive.filter((item) => item.conversation_id === id)
     ),
     outbox: vi.fn(async () => [...outbox]),
-    prepareMessage: vi.fn(
+    queueMessage: vi.fn(
       async (input: {
         conversation_id: string
         client_message_id: string
         text: string
-        peers: PeerBundle[]
       }) => {
-        const prepared: PreparedMessage = {
-          conversation_id: input.conversation_id,
-          client_message_id: input.client_message_id,
-          sender_device_id: ownDevice.public_device_id,
-          envelopes: input.peers.map((peer) => ({
-            recipient_device_id: peer.public_device_id,
-            protocol_version: "signal-pqxdh-v1",
-            message_type: 3,
-            ciphertext: `fixed-encrypted-${input.client_message_id}`,
-          })),
-        }
-        outbox.push(prepared)
         archive.push({
           public_message_id: null,
           conversation_id: input.conversation_id,
@@ -215,6 +202,36 @@ function createVault() {
           created_at: "2026-11-04T10:02:00Z",
           status: "pending",
         })
+        return archive.at(-1)!
+      }
+    ),
+    queuedMessages: vi.fn(async () =>
+      archive.filter(
+        (message) =>
+          message.sender_handle === "alice" &&
+          message.status === "pending" &&
+          !outbox.some(
+            (item) => item.client_message_id === message.client_message_id
+          )
+      )
+    ),
+    prepareQueuedMessage: vi.fn(
+      async (clientId: string, peers: PeerBundle[]) => {
+        const input = archive.find(
+          (message) => message.client_message_id === clientId
+        )!
+        const prepared: PreparedMessage = {
+          conversation_id: input.conversation_id,
+          client_message_id: input.client_message_id,
+          sender_device_id: ownDevice.public_device_id,
+          envelopes: peers.map((peer) => ({
+            recipient_device_id: peer.public_device_id,
+            protocol_version: "signal-pqxdh-v1",
+            message_type: 3,
+            ciphertext: `fixed-encrypted-${input.client_message_id}`,
+          })),
+        }
+        outbox.push(prepared)
         return prepared
       }
     ),
@@ -251,6 +268,8 @@ function createApi() {
     })),
     devices: vi.fn(async () => [ownDevice]),
     conversations: vi.fn(async () => [conversation]),
+    conversation: vi.fn(async () => conversation),
+    summary: vi.fn(async () => ({ received_count: 0, unread_count: 0 })),
     createConversation: vi.fn(async () => conversation),
     registerDevice: vi.fn(async () => ownDevice),
     revokeDevice: vi.fn(async () => undefined),
@@ -318,6 +337,97 @@ afterEach(() => {
 })
 
 describe("chat controller lifecycle and durable relay", () => {
+  it("loads and refreshes account totals independently of the first conversation page", async () => {
+    api.conversations.mockResolvedValue(
+      Array.from({ length: 50 }, (_, index) => ({
+        ...conversation,
+        public_conversation_id: `conversation-${index}`,
+        received_count: 1,
+        unread_count: 0,
+      }))
+    )
+    api.summary.mockResolvedValue({ received_count: 340, unread_count: 9 })
+    const chat = controller()
+    await chat.start()
+    expect(chat.getSnapshot().conversations).toHaveLength(50)
+    expect(chat.getSnapshot().summary).toEqual({
+      received_count: 340,
+      unread_count: 9,
+    })
+
+    api.summary.mockResolvedValue({ received_count: 341, unread_count: 10 })
+    await chat.refreshConversations()
+    expect(chat.getSnapshot().summary).toEqual({
+      received_count: 341,
+      unread_count: 10,
+    })
+  })
+
+  it.each(["poll", "reconnect"] as const)(
+    "discovers a recipient's first device on %s without requiring manual verification",
+    async (trigger) => {
+      let recipientRegistered = false
+      const otherOwnDevice = {
+        ...ownDevice,
+        public_device_id: "device-alice-0002",
+        signal_device_id: 2,
+      }
+      api.keys.mockImplementation(async (handle) =>
+        handle === "alice"
+          ? [ownDevice, otherOwnDevice].map((device) => ({
+              device,
+              prekeys: refreshedKeys,
+            }))
+          : recipientRegistered
+            ? [{ device: peerDevice, prekeys: refreshedKeys }]
+            : []
+      )
+      vault.acceptPeer.mockImplementation(async (bundle) => ({
+        public_device_id: bundle.public_device_id,
+        user_handle: bundle.user_handle,
+        verified: bundle.user_handle === "alice",
+        safety_number: "1".repeat(60),
+      }))
+      const chat = controller()
+      await chat.start()
+      await chat.select(conversation)
+      expect(chat.getSnapshot().trusts).toEqual([
+        expect.objectContaining({ user_handle: "alice", verified: true }),
+      ])
+
+      recipientRegistered = true
+      api.keys.mockClear()
+      if (trigger === "poll") await vi.advanceTimersByTimeAsync(5000)
+      else mocked.sockets[0].state("online")
+      await settle()
+      expect(api.keys).toHaveBeenCalledWith("bob")
+      expect(chat.getSnapshot().trusts).toContainEqual(
+        expect.objectContaining({
+          public_device_id: peerDevice.public_device_id,
+          user_handle: "bob",
+          verified: false,
+        })
+      )
+      expect(vault.verifyPeer).not.toHaveBeenCalled()
+
+      api.keys.mockClear()
+      if (trigger === "poll") await vi.advanceTimersByTimeAsync(5000)
+      else mocked.sockets[0].state("online")
+      await settle()
+      expect(api.keys).not.toHaveBeenCalled()
+    }
+  )
+
+  it("reports failed conversation selection so profile links can offer a retry", async () => {
+    const chat = controller()
+    await chat.start()
+    api.keys.mockRejectedValueOnce(new Error("Could not load device keys."))
+    expect(await chat.createConversation("bob")).toBe(false)
+    expect(chat.getSnapshot().error).toBe("Could not load device keys.")
+    expect(chat.getSnapshot().busy).toBe(false)
+    expect(await chat.createConversation("bob")).toBe(true)
+  })
+
   it("uploads the full current public material after refreshing prekeys", async () => {
     const chat = controller()
     await chat.start()
@@ -346,6 +456,7 @@ describe("chat controller lifecycle and durable relay", () => {
     expect(chat.getSnapshot().phase).toBe("disabled")
     expect(mocked.open).not.toHaveBeenCalled()
     expect(api.devices).not.toHaveBeenCalled()
+    expect(api.summary).not.toHaveBeenCalled()
     expect(api.uploadKeys).not.toHaveBeenCalled()
     expect(mocked.sockets).toHaveLength(0)
     expect(vi.getTimerCount()).toBe(0)
@@ -378,6 +489,7 @@ describe("chat controller lifecycle and durable relay", () => {
     await chat.select(conversation)
     api.send.mockRejectedValueOnce(new Error("Network offline"))
     expect(await chat.send("Hello 💬")).toBe(true)
+    await chat.sync()
     expect(outbox).toHaveLength(1)
     expect(chat.getSnapshot().messages[0]).toMatchObject({
       text: "Hello 💬",
@@ -389,10 +501,289 @@ describe("chat controller lifecycle and durable relay", () => {
     await chat.sync()
     expect(api.send).toHaveBeenCalledTimes(2)
     expect(api.send.mock.calls[1][0]).toBe(original)
-    expect(vault.prepareMessage).toHaveBeenCalledOnce()
+    expect(vault.prepareQueuedMessage).toHaveBeenCalledOnce()
     expect(api.claim).not.toHaveBeenCalled()
     expect(outbox).toHaveLength(0)
     expect(chat.getSnapshot().messages[0].status).toBe("sent")
+  })
+
+  it("accepts a message before the recipient has a device and restores its pending bubble after reload", async () => {
+    api.keys.mockImplementation(async (handle) =>
+      handle === "alice" ? [{ device: ownDevice, prekeys: refreshedKeys }] : []
+    )
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    expect(await chat.send("Hello before you join 👋")).toBe(true)
+    expect(chat.getSnapshot().busy).toBe(false)
+    expect(chat.getSnapshot().messages).toEqual([
+      expect.objectContaining({
+        text: "Hello before you join 👋",
+        status: "pending",
+        public_message_id: null,
+      }),
+    ])
+    await chat.sync()
+    expect(chat.getSnapshot().pendingDelivery).toBe("recipient-setup")
+    expect(chat.getSnapshot().error).toBeNull()
+    expect(api.send).not.toHaveBeenCalled()
+    expect(vault.prepareQueuedMessage).not.toHaveBeenCalled()
+    expect(outbox).toEqual([])
+    chat.stop()
+
+    const reloaded = controller()
+    await reloaded.start()
+    api.messages.mockRejectedValueOnce(
+      new Error("History is temporarily offline")
+    )
+    await reloaded.select(conversation)
+    expect(reloaded.getSnapshot().messages).toHaveLength(1)
+    expect(reloaded.getSnapshot().messages[0]).toMatchObject({
+      text: "Hello before you join 👋",
+      status: "pending",
+    })
+    expect(api.send).not.toHaveBeenCalled()
+    reloaded.clearSelection()
+    expect(reloaded.getSnapshot()).toMatchObject({
+      selected: null,
+      messages: [],
+      trusts: [],
+      pendingDelivery: null,
+    })
+    expect(archive).toHaveLength(1)
+    api.keys.mockImplementation(async (handle) => [
+      {
+        device: handle === "alice" ? ownDevice : peerDevice,
+        prekeys: refreshedKeys,
+      },
+    ])
+    await reloaded.sync()
+    expect(api.send).toHaveBeenCalledOnce()
+    expect(reloaded.getSnapshot().selected).toBeNull()
+    expect(reloaded.getSnapshot().messages).toEqual([])
+  })
+
+  it("finishes the local save without waiting for delivery and retains a second queued message", async () => {
+    const response = deferred<Awaited<ReturnType<typeof api.send>>>()
+    api.send.mockReturnValueOnce(response.promise)
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    expect(await chat.send("First local message")).toBe(true)
+    await settle()
+    expect(api.send).toHaveBeenCalledOnce()
+    expect(chat.getSnapshot().busy).toBe(false)
+    expect(await chat.send("Second local message")).toBe(true)
+    expect(chat.getSnapshot().messages.map((item) => item.text)).toEqual([
+      "First local message",
+      "Second local message",
+    ])
+    const first = api.send.mock.calls[0]![0]
+    response.resolve({
+      public_message_id: "first-server-message",
+      client_message_id: first.client_message_id,
+      created_at: "2026-11-04T10:02:01Z",
+      duplicate: false,
+    })
+    await chat.sync()
+    await chat.sync()
+    expect(api.send).toHaveBeenCalledTimes(2)
+    expect(
+      new Set(api.send.mock.calls.map(([message]) => message.client_message_id))
+        .size
+    ).toBe(2)
+    expect(archive).toHaveLength(2)
+    expect(archive.map((item) => item.status)).toEqual(["sent", "sent"])
+  })
+
+  it("automatically sends the original queued message once an unverified recipient registers", async () => {
+    let registered = false
+    api.keys.mockImplementation(async (handle) =>
+      handle === "alice"
+        ? [{ device: ownDevice, prekeys: refreshedKeys }]
+        : registered
+          ? [{ device: peerDevice, prekeys: refreshedKeys }]
+          : []
+    )
+    vault.acceptPeer.mockImplementation(async (bundle) => ({
+      public_device_id: bundle.public_device_id,
+      user_handle: bundle.user_handle,
+      verified: false,
+      safety_number: "1".repeat(60),
+    }))
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    await chat.send("Keep my original message")
+    await chat.sync()
+    const originalId = archive[0]!.client_message_id
+    registered = true
+    await vi.advanceTimersByTimeAsync(5000)
+    await settle()
+    expect(chat.getSnapshot().trusts).toContainEqual(
+      expect.objectContaining({ user_handle: "bob", verified: false })
+    )
+    expect(chat.getSnapshot().error).toBeNull()
+    expect(api.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ client_message_id: originalId })
+    )
+    expect(archive).toHaveLength(1)
+    expect(archive[0]).toMatchObject({
+      client_message_id: originalId,
+      text: "Keep my original message",
+      status: "sent",
+    })
+    expect(chat.getSnapshot().pendingDelivery).toBeNull()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.send).toHaveBeenCalledOnce()
+    expect(vault.prepareQueuedMessage).toHaveBeenCalledExactlyOnceWith(
+      originalId,
+      expect.any(Array)
+    )
+    expect(vault.verifyPeer).not.toHaveBeenCalled()
+  })
+
+  it("resumes a legacy queued message on startup while its saved destination is still unverified", async () => {
+    archive.push({
+      public_message_id: null,
+      conversation_id: conversation.public_conversation_id,
+      client_message_id: "legacy-pending-message",
+      sender_device_id: ownDevice.public_device_id,
+      sender_handle: "alice",
+      text: "Previously waiting for verification",
+      created_at: "2026-11-04T09:00:00Z",
+      status: "pending",
+    })
+    const chat = controller()
+    await chat.start()
+    expect(api.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ client_message_id: "legacy-pending-message" })
+    )
+    expect(archive).toHaveLength(1)
+    expect(archive[0]).toMatchObject({
+      client_message_id: "legacy-pending-message",
+      text: "Previously waiting for verification",
+      status: "sent",
+    })
+    expect(vault.verifyPeer).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.send).toHaveBeenCalledOnce()
+  })
+
+  it("sends directly to all valid recipient and account devices without marking them manually verified", async () => {
+    const secondOwnDevice = {
+      ...ownDevice,
+      public_device_id: "device-alice-0002",
+      signal_device_id: 2,
+    }
+    const secondPeerDevice = {
+      ...peerDevice,
+      public_device_id: "device-bob-000002",
+      signal_device_id: 2,
+    }
+    api.keys.mockImplementation(async (handle) =>
+      (handle === "alice"
+        ? [ownDevice, secondOwnDevice]
+        : [peerDevice, secondPeerDevice]
+      ).map((device) => ({ device, prekeys: refreshedKeys }))
+    )
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    expect(chat.getSnapshot().trusts).toHaveLength(3)
+    expect(chat.getSnapshot().trusts.every((trust) => !trust.verified)).toBe(
+      true
+    )
+    expect(await chat.send("Send to every registered device")).toBe(true)
+    await chat.sync()
+    expect(api.send).toHaveBeenCalledOnce()
+    expect(
+      new Set(
+        api.send.mock.calls[0]![0].envelopes.map(
+          (item) => item.recipient_device_id
+        )
+      )
+    ).toEqual(
+      new Set([
+        peerDevice.public_device_id,
+        secondPeerDevice.public_device_id,
+        secondOwnDevice.public_device_id,
+      ])
+    )
+    expect(archive[0]?.status).toBe("sent")
+    expect(vault.verifyPeer).not.toHaveBeenCalled()
+    expect(chat.getSnapshot().trusts.every((trust) => !trust.verified)).toBe(
+      true
+    )
+  })
+
+  it("keeps queued content local when automatic identity validation rejects a destination", async () => {
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    vault.acceptPeer.mockRejectedValue(
+      new Error("This device's identity changed.")
+    )
+    expect(await chat.send("Keep private when identity changes")).toBe(true)
+    await chat.sync()
+    expect(archive[0]).toMatchObject({
+      text: "Keep private when identity changes",
+      status: "pending",
+      public_message_id: null,
+    })
+    expect(chat.getSnapshot().error).toContain("identity changed")
+    expect(vault.prepareQueuedMessage).not.toHaveBeenCalled()
+    expect(api.send).not.toHaveBeenCalled()
+    expect(vault.verifyPeer).not.toHaveBeenCalled()
+  })
+
+  it("delivers a queued conversation outside the first page without changing the selected chat", async () => {
+    const carol: ChatConversation = {
+      ...conversation,
+      public_conversation_id: "conversation-carol-0002",
+      peer: { ...conversation.peer, user_handle: "carol", full_name: "Carol" },
+    }
+    const carolDevice = {
+      ...peerDevice,
+      public_device_id: "device-carol-0001",
+      user_handle: "carol",
+    }
+    let bobRegistered = false
+    api.keys.mockImplementation(async (handle) => {
+      const devices =
+        handle === "alice"
+          ? [ownDevice]
+          : handle === "carol"
+            ? [carolDevice]
+            : bobRegistered
+              ? [peerDevice]
+              : []
+      return devices.map((device) => ({ device, prekeys: refreshedKeys }))
+    })
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    await chat.send("Queued for Bob only")
+    await chat.sync()
+    api.conversations.mockResolvedValue([carol])
+    await chat.refreshConversations()
+    await chat.select(carol)
+    bobRegistered = true
+    await chat.sync()
+    expect(api.conversation).toHaveBeenCalledWith(
+      conversation.public_conversation_id
+    )
+    expect(api.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        conversation_id: conversation.public_conversation_id,
+      })
+    )
+    expect(chat.getSnapshot().selected?.peer.user_handle).toBe("carol")
+    expect(chat.getSnapshot().trusts).toEqual([
+      expect.objectContaining({ user_handle: "carol" }),
+    ])
+    expect(chat.getSnapshot().messages).toEqual([])
+    expect(chat.getSnapshot().pendingDelivery).toBeNull()
   })
 
   it("reconciles receipt history after reconnect and fetches realtime messages from durable pending storage", async () => {
@@ -545,5 +936,27 @@ describe("chat controller lifecycle and durable relay", () => {
     await vi.advanceTimersByTimeAsync(60000)
     expect(api.pending).toHaveBeenCalledTimes(pendingCalls)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("does not restore selected plaintext from a late read-history response after leaving messaging", async () => {
+    api.pending.mockResolvedValueOnce({
+      items: [serverMessage("visible-message-late")],
+      next_before_id: null,
+      next_after_id: null,
+    })
+    const chat = controller()
+    await chat.start()
+    await chat.select(conversation)
+    vi.mocked(document.hasFocus).mockReturnValue(true)
+    const delayedHistory = deferred<HistoryMessage[]>()
+    vault.history.mockReturnValueOnce(delayedHistory.promise)
+    const reading = chat.markVisibleRead()
+    await settle()
+    chat.clearSelection()
+    delayedHistory.resolve([...archive])
+    await reading
+    expect(chat.getSnapshot().selected).toBeNull()
+    expect(chat.getSnapshot().messages).toEqual([])
+    expect(chat.getSnapshot().trusts).toEqual([])
   })
 })

@@ -34,6 +34,7 @@ export interface DeviceMaterial {
 export interface PeerTrust {
   public_device_id: string
   user_handle: string
+  /** Optional manual assurance; validated identity pins allow direct delivery. */
   verified: boolean
   safety_number: string
 }

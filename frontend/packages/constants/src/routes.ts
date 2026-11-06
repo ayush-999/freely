@@ -17,6 +17,7 @@ export const APP_ROUTES = {
   },
   notifications: "/notifications",
   messaging: "/messages",
+  messageUser: (handle: string) => `/messages?to=${encodeURIComponent(handle)}`,
   saved: "/saved",
   comingSoon: (feature: string) =>
     `/coming-soon?feature=${encodeURIComponent(feature)}`,

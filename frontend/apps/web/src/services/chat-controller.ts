@@ -7,16 +7,20 @@ import type {
   ChatConversation,
   ChatDevice,
   ChatEvent,
+  ChatSummary,
   ServerMessage,
 } from "@/types/chat"
 import { peerBundle } from "@/types/chat"
 import { createChatService } from "./chat.service"
 import { ChatRealtime, type ConnectionState } from "./chat-realtime"
 
+export type PendingDelivery = "recipient-setup" | "connection"
+
 export interface ChatSnapshot {
   phase: "loading" | "disabled" | "ready" | "error"
   connection: ConnectionState
   conversations: ChatConversation[]
+  summary?: ChatSummary
   selected: ChatConversation | null
   messages: HistoryMessage[]
   devices: ChatDevice[]
@@ -27,6 +31,7 @@ export interface ChatSnapshot {
   typing: boolean
   online: boolean
   hasOlder: boolean
+  pendingDelivery?: PendingDelivery | null
 }
 
 function initialSnapshot(): ChatSnapshot {
@@ -44,10 +49,11 @@ function initialSnapshot(): ChatSnapshot {
     typing: false,
     online: false,
     hasOlder: false,
+    pendingDelivery: null,
   }
 }
 
-/** Page-scoped transient state. Plaintext and keys never enter Redux or HTTP DTOs. */
+/** Account-session state. Selected plaintext is cleared when the messaging page closes. */
 export class ChatController {
   private account: string
   private snapshot = initialSnapshot()
@@ -66,6 +72,7 @@ export class ChatController {
   private lastTypingAt = 0
   private lastKeyRefresh = 0
   private selectionEpoch = 0
+  private pendingReasons = new Map<string, PendingDelivery>()
 
   constructor(account: string) {
     this.account = account
@@ -90,6 +97,21 @@ export class ChatController {
     })
   }
 
+  private waiting(conversationId: string, reason: PendingDelivery) {
+    this.pendingReasons.set(conversationId, reason)
+    if (this.snapshot.selected?.public_conversation_id === conversationId)
+      this.update({ pendingDelivery: reason })
+  }
+
+  private deliveryState(conversationId: string, messages: HistoryMessage[]) {
+    return messages.some(
+      (message) =>
+        message.sender_handle === this.account && message.status === "pending"
+    )
+      ? (this.pendingReasons.get(conversationId) ?? "connection")
+      : null
+  }
+
   async start() {
     this.running = true
     const epoch = ++this.epoch
@@ -104,7 +126,12 @@ export class ChatController {
       const config = await this.api.config()
       if (!this.running || epoch !== this.epoch) return
       if (!config.enabled) {
-        this.update({ phase: "disabled" })
+        this.update({
+          phase: "disabled",
+          error:
+            config.unavailable_reason ??
+            "Messaging is temporarily unavailable. Please try again shortly.",
+        })
         return
       }
       const vault = await ChatCrypto.open(this.account)
@@ -146,14 +173,18 @@ export class ChatController {
       await this.api.uploadKeys(device.public_device_id, publicMaterial.prekeys)
       this.lastKeyRefresh = Date.now()
       if (!this.running || epoch !== this.epoch) return
-      const activeDevices = await this.api.devices()
-      const conversations = await this.api.conversations()
+      const [activeDevices, conversations, summary] = await Promise.all([
+        this.api.devices(),
+        this.api.conversations(),
+        this.api.summary(),
+      ])
       if (!alive()) return
       this.update({
         phase: "ready",
         deviceId: device.public_device_id,
         devices: activeDevices,
         conversations,
+        summary,
       })
       this.realtime = new ChatRealtime(
         device.public_device_id,
@@ -199,14 +230,30 @@ export class ChatController {
     this.syncing = null
     this.selectionEpoch++
     this.peers.clear()
+    this.pendingReasons.clear()
     this.snapshot = initialSnapshot()
   }
 
   async refreshConversations() {
     const epoch = this.epoch
     try {
-      const conversations = await this.api.conversations()
-      if (epoch === this.epoch) this.update({ conversations })
+      const [conversations, summary] = await Promise.all([
+        this.api.conversations(),
+        this.api.summary(),
+      ])
+      if (epoch === this.epoch && this.running) {
+        this.update({
+          conversations,
+          summary,
+          selected:
+            conversations.find(
+              (item) =>
+                item.public_conversation_id ===
+                this.snapshot.selected?.public_conversation_id
+            ) ?? this.snapshot.selected,
+        })
+        window.dispatchEvent(new Event("freely:chat-updated"))
+      }
     } catch (error) {
       if (epoch === this.epoch) this.fail(error)
     }
@@ -217,16 +264,17 @@ export class ChatController {
     try {
       const conversation = await this.api.createConversation(handle)
       await this.refreshConversations()
-      await this.select(conversation)
+      return await this.select(conversation)
     } catch (error) {
       this.fail(error)
+      return false
     } finally {
       this.update({ busy: false })
     }
   }
 
   async select(conversation: ChatConversation) {
-    if (!this.crypto) return
+    if (!this.crypto) return false
     const selection = ++this.selectionEpoch
     const previous = this.snapshot.selected
     if (previous)
@@ -241,41 +289,115 @@ export class ChatController {
       typing: false,
       online: false,
       hasOlder: false,
+      pendingDelivery: null,
       error: null,
     })
     try {
       await this.loadPeers(conversation)
-      if (selection !== this.selectionEpoch || !this.running) return
+      if (selection !== this.selectionEpoch || !this.running) return false
       this.realtime?.send("presence.subscribe", {
         public_conversation_id: conversation.public_conversation_id,
       })
       await this.loadHistory(false)
       await this.sync()
+      return selection === this.selectionEpoch && this.running
     } catch (error) {
       this.fail(error)
+      return false
     }
+  }
+
+  clearSelection() {
+    if (!this.snapshot.selected && !this.snapshot.messages.length) return
+    this.typing(false)
+    this.selectionEpoch++
+    this.olderCursor = null
+    this.update({
+      selected: null,
+      messages: [],
+      trusts: [],
+      pendingDelivery: null,
+      typing: false,
+      online: false,
+      hasOlder: false,
+    })
   }
 
   private async loadPeers(conversation: ChatConversation) {
     const vault = this.crypto
-    if (!vault) return
+    if (!vault) return null
+    const epoch = this.epoch
+    const selection = this.selectionEpoch
     const bundles = [
       ...(await this.api.keys(conversation.peer.user_handle)),
       ...(await this.api.keys(this.account)),
     ]
     const trusts: PeerTrust[] = []
     for (const bundle of bundles) {
+      if (!this.running || epoch !== this.epoch) return null
       if (bundle.device.public_device_id === this.snapshot.deviceId) continue
       const peer = peerBundle(bundle)
       const trust = await vault.acceptPeer(peer)
+      if (!this.running || epoch !== this.epoch) return null
       this.peers.set(peer.public_device_id, peer)
       trusts.push(trust)
     }
     if (
+      epoch === this.epoch &&
+      selection === this.selectionEpoch &&
       this.snapshot.selected?.public_conversation_id ===
-      conversation.public_conversation_id
+        conversation.public_conversation_id
     )
       this.update({ trusts })
+    return trusts
+  }
+
+  /** Validate and pin destination identities before creating encrypted envelopes. */
+  private async queuedDestinations(
+    conversation: ChatConversation,
+    deviceId: string
+  ) {
+    const vault = this.crypto
+    if (!vault) return null
+    const epoch = this.epoch
+    const trusts = await this.loadPeers(conversation)
+    if (!trusts || epoch !== this.epoch || !this.running) return null
+    const id = conversation.public_conversation_id
+    if (
+      !trusts.some(
+        (trust) =>
+          trust.user_handle.toLowerCase() ===
+          conversation.peer.user_handle.toLowerCase()
+      )
+    ) {
+      this.waiting(id, "recipient-setup")
+      return null
+    }
+    const peers = [
+      ...(await this.destinationBundles(
+        conversation.peer.user_handle,
+        deviceId
+      )),
+      ...(await this.destinationBundles(this.account, deviceId)),
+    ]
+    if (epoch !== this.epoch || !this.running) return null
+    if (
+      !peers.some(
+        (peer) =>
+          peer.user_handle.toLowerCase() ===
+          conversation.peer.user_handle.toLowerCase()
+      )
+    ) {
+      this.waiting(id, "recipient-setup")
+      return null
+    }
+    // A device may register between the directory read and the key claim.
+    for (const peer of peers) {
+      await vault.acceptPeer(peer)
+      if (epoch !== this.epoch || !this.running) return null
+    }
+    this.waiting(id, "connection")
+    return peers
   }
 
   private async destinationBundles(
@@ -302,19 +424,6 @@ export class ChatController {
     )
   }
 
-  async verify(deviceId: string, number: string) {
-    if (!this.crypto) return
-    try {
-      await this.crypto.verifyPeer(deviceId, number)
-      if (this.snapshot.selected) await this.loadPeers(this.snapshot.selected)
-      await this.sync()
-      await this.loadHistory(false)
-      this.update({ error: null })
-    } catch (error) {
-      this.fail(error)
-    }
-  }
-
   private async process(message: ServerMessage) {
     const vault = this.crypto
     const deviceId = this.snapshot.deviceId
@@ -336,7 +445,7 @@ export class ChatController {
         )
         if (!bundle)
           throw new Error(
-            "The sender's device is no longer available for verification."
+            "The sender's messaging device is no longer available."
           )
         sender = peerBundle(bundle)
         await vault.acceptPeer(sender)
@@ -367,6 +476,12 @@ export class ChatController {
     if (!selected || !vault || !deviceId) return
     const id = selected.public_conversation_id
     try {
+      const local = await vault.history(id)
+      if (epoch !== this.epoch || selection !== this.selectionEpoch) return
+      this.update({
+        messages: local,
+        pendingDelivery: this.deliveryState(id, local),
+      })
       const page = await this.api.messages(
         id,
         deviceId,
@@ -389,7 +504,11 @@ export class ChatController {
         return
       if (older || this.olderCursor === null)
         this.olderCursor = page.next_before_id
-      this.update({ messages, hasOlder: !!this.olderCursor })
+      this.update({
+        messages,
+        hasOlder: !!this.olderCursor,
+        pendingDelivery: this.deliveryState(id, messages),
+      })
     } catch (error) {
       if (epoch === this.epoch) this.fail(error)
     }
@@ -401,6 +520,9 @@ export class ChatController {
     const vault = this.crypto
     const deviceId = this.snapshot.deviceId
     if (!selected || !vault || !deviceId) return
+    const epoch = this.epoch
+    const selection = this.selectionEpoch
+    let changed = false
     try {
       for (const message of this.snapshot.messages) {
         if (
@@ -417,14 +539,17 @@ export class ChatController {
           return
         await this.api.receipt(message.public_message_id, deviceId, "read")
         await vault.markReceipt(message.public_message_id, "read")
+        changed = true
       }
+      const messages = await vault.history(selected.public_conversation_id)
       if (
+        epoch === this.epoch &&
+        selection === this.selectionEpoch &&
         this.snapshot.selected?.public_conversation_id ===
-        selected.public_conversation_id
+          selected.public_conversation_id
       )
-        this.update({
-          messages: await vault.history(selected.public_conversation_id),
-        })
+        this.update({ messages })
+      if (changed) await this.refreshConversations()
     } catch (error) {
       this.fail(error)
     }
@@ -447,6 +572,36 @@ export class ChatController {
     const deviceId = this.snapshot.deviceId
     if (!vault || !deviceId) return
     try {
+      const queued = await vault.queuedMessages()
+      const groups = new Map<string, HistoryMessage[]>()
+      for (const message of queued) {
+        const group = groups.get(message.conversation_id) ?? []
+        group.push(message)
+        groups.set(message.conversation_id, group)
+      }
+      for (const [id, messages] of groups) {
+        if (epoch !== this.epoch || !this.running) return
+        try {
+          const conversation =
+            this.snapshot.conversations.find(
+              (item) => item.public_conversation_id === id
+            ) ??
+            (this.snapshot.selected?.public_conversation_id === id
+              ? this.snapshot.selected
+              : null) ??
+            (await this.api.conversation(id))
+          const peers = await this.queuedDestinations(conversation, deviceId)
+          if (!peers || epoch !== this.epoch || !this.running) continue
+          for (const message of messages)
+            await vault.prepareQueuedMessage(message.client_message_id, peers)
+        } catch (error) {
+          if (epoch === this.epoch) {
+            this.waiting(id, "connection")
+            this.fail(error)
+          }
+        }
+      }
+      let sentAny = false
       for (let pending of await vault.outbox()) {
         if (epoch !== this.epoch || !this.running) return
         try {
@@ -462,18 +617,13 @@ export class ChatController {
               )
             )
               throw error
-            const conversation = this.snapshot.conversations.find(
-              (item) => item.public_conversation_id === pending.conversation_id
-            )
-            if (!conversation) throw error
-            await this.loadPeers(conversation)
-            const peers = [
-              ...(await this.destinationBundles(
-                conversation.peer.user_handle,
-                deviceId
-              )),
-              ...(await this.destinationBundles(this.account, deviceId)),
-            ]
+            const conversation =
+              this.snapshot.conversations.find(
+                (item) =>
+                  item.public_conversation_id === pending.conversation_id
+              ) ?? (await this.api.conversation(pending.conversation_id))
+            const peers = await this.queuedDestinations(conversation, deviceId)
+            if (!peers) continue
             pending = await vault.repreparePending(
               pending.client_message_id,
               peers
@@ -485,9 +635,17 @@ export class ChatController {
             result.public_message_id,
             result.created_at
           )
+          sentAny = true
         } catch (error) {
-          if (epoch === this.epoch) this.fail(error)
+          if (epoch === this.epoch) {
+            this.waiting(pending.conversation_id, "connection")
+            this.fail(error)
+          }
         }
+      }
+      if (sentAny) {
+        this.update({ error: null })
+        await this.refreshConversations()
       }
       let afterId: string | undefined
       const seenCursors = new Set<string>()
@@ -504,7 +662,7 @@ export class ChatController {
             )
               this.update({
                 error:
-                  "A message is waiting for secure delivery. Check device verification or try again shortly.",
+                  "A message is waiting for secure delivery. Please try again shortly.",
               })
           }
         }
@@ -533,13 +691,25 @@ export class ChatController {
       }
       const selected = this.snapshot.selected
       if (selected) {
+        if (
+          !this.snapshot.trusts.some(
+            (trust) => trust.user_handle === selected.peer.user_handle
+          )
+        )
+          await this.loadPeers(selected)
         const messages = await vault.history(selected.public_conversation_id)
         if (
           epoch === this.epoch &&
           this.snapshot.selected?.public_conversation_id ===
             selected.public_conversation_id
         )
-          this.update({ messages })
+          this.update({
+            messages,
+            pendingDelivery: this.deliveryState(
+              selected.public_conversation_id,
+              messages
+            ),
+          })
       }
     } catch (error) {
       if (epoch === this.epoch) this.fail(error)
@@ -550,29 +720,45 @@ export class ChatController {
     const selected = this.snapshot.selected
     const vault = this.crypto
     const deviceId = this.snapshot.deviceId
-    if (!selected || !vault || !deviceId || !text.trim()) return false
+    if (
+      !selected ||
+      !vault ||
+      !deviceId ||
+      !text.trim() ||
+      this.snapshot.phase !== "ready"
+    )
+      return false
+    const epoch = this.epoch
     this.update({ busy: true, error: null })
     try {
-      await this.loadPeers(selected)
-      const peers = [
-        ...(await this.destinationBundles(selected.peer.user_handle, deviceId)),
-        ...(await this.destinationBundles(this.account, deviceId)),
-      ]
-      if (!peers.some((peer) => peer.user_handle !== this.account))
-        throw new Error(
-          "This person has not registered a messaging device yet."
-        )
-      await vault.prepareMessage({
+      await vault.queueMessage({
         conversation_id: selected.public_conversation_id,
         client_message_id: crypto.randomUUID(),
         text,
-        peers,
       })
-      this.update({
-        messages: await vault.history(selected.public_conversation_id),
-      })
-      this.typing(false)
-      await this.sync()
+      if (epoch !== this.epoch || !this.running) return false
+      const messages = await vault.history(selected.public_conversation_id)
+      if (epoch !== this.epoch || !this.running) return false
+      if (
+        this.snapshot.selected?.public_conversation_id ===
+        selected.public_conversation_id
+      ) {
+        const reason = !this.snapshot.trusts.some(
+          (trust) =>
+            trust.user_handle.toLowerCase() ===
+            selected.peer.user_handle.toLowerCase()
+        )
+          ? "recipient-setup"
+          : "connection"
+        this.waiting(selected.public_conversation_id, reason)
+        this.update({ messages })
+      }
+      if (
+        this.snapshot.selected?.public_conversation_id ===
+        selected.public_conversation_id
+      )
+        this.typing(false)
+      void this.sync()
       return true
     } catch (error) {
       this.fail(error)
@@ -641,13 +827,20 @@ export class ChatController {
         data.public_message_id,
         event.type === "message.read" ? "read" : "delivered"
       )
-      if (this.snapshot.selected)
-        this.update({
-          messages:
-            (await this.crypto?.history(
-              this.snapshot.selected.public_conversation_id
-            )) ?? [],
-        })
+      const selected = this.snapshot.selected
+      if (selected) {
+        const epoch = this.epoch
+        const selection = this.selectionEpoch
+        const messages =
+          (await this.crypto?.history(selected.public_conversation_id)) ?? []
+        if (
+          epoch === this.epoch &&
+          selection === this.selectionEpoch &&
+          this.snapshot.selected?.public_conversation_id ===
+            selected.public_conversation_id
+        )
+          this.update({ messages })
+      }
     }
     if (
       data.public_conversation_id !==

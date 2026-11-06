@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import (
     ConflictError,
@@ -45,6 +46,8 @@ from app.schemas.social import (
     PostCreateRequest,
     PostUpdateRequest,
     RepostRequest,
+    RelationshipPersonResponse,
+    UserRelationshipResponse,
 )
 from app.services.base import BaseService
 from app.services.permissions import require_platform_role, user_has_platform_role
@@ -615,6 +618,60 @@ class SocialService(BaseService):
         return liked
 
     # ---------------------------------------------------------------- follows
+    def _relationship_target(self, handle: str) -> User:
+        target = self.users.get_by_handle(handle)
+        if target is None or not target.is_active:
+            raise NotFoundError("User not found")
+        return target
+
+    def _relationship_summary(self, viewer: Optional[User], target: User) -> UserRelationshipResponse:
+        is_self = viewer is not None and viewer.id == target.id
+        return UserRelationshipResponse(
+            user_handle=target.user_handle,
+            followers_count=self.follows.count_people(target.id, "followers"),
+            following_count=self.follows.count_people(target.id, "following"),
+            is_following=bool(viewer and not is_self and self.follows.get_pair(viewer.id, target.id)),
+            follows_you=bool(viewer and not is_self and self.follows.get_pair(target.id, viewer.id)),
+            is_self=is_self,
+        )
+
+    def relationship(self, viewer: Optional[User], handle: str) -> UserRelationshipResponse:
+        return self._relationship_summary(viewer, self._relationship_target(handle))
+
+    def relationship_people(self, viewer: Optional[User], handle: str, direction: str, limit: int, offset: int):
+        if direction not in ("followers", "following"):
+            raise UnprocessableError("Unknown relationship list")
+        target = self._relationship_target(handle)
+        people = self.follows.people(target.id, direction, limit, offset)
+        pairs = self.follows.viewer_pairs(viewer.id, [person.id for person in people]) if viewer else set()
+        items = [RelationshipPersonResponse.model_validate(person).model_copy(update={
+            "is_self": bool(viewer and viewer.id == person.id),
+            "is_following": bool(viewer and (viewer.id, person.id) in pairs),
+            "follows_you": bool(viewer and (person.id, viewer.id) in pairs),
+        }) for person in people]
+        return {"items": items, "total": self.follows.count_people(target.id, direction), "limit": limit, "offset": offset}
+
+    def set_follow(self, viewer: User, handle: str, following: bool) -> UserRelationshipResponse:
+        """Idempotent handle adapter over user_follows; legacy toggle stays intact."""
+        target = self._relationship_target(handle)
+        if target.id == viewer.id:
+            raise ForbiddenError("You cannot follow yourself")
+        if following:
+            if self.follows.get_pair(viewer.id, target.id) is None:
+                self.db.add(UserFollow(follower_user_id=viewer.id, followed_user_id=target.id))
+            try:
+                self.db.commit()
+            except IntegrityError:
+                self.db.rollback()
+                # The composite PK safely arbitrates concurrent identical PUTs.
+                # Other integrity failures must not be reported as success.
+                if self.follows.get_pair(viewer.id, target.id) is None:
+                    raise ConflictError("Follow change conflicted; please retry") from None
+        else:
+            self.follows.remove_pair(viewer.id, target.id)
+            self.db.commit()
+        return self._relationship_summary(viewer, target)
+
     def toggle_follow(self, user: User, target_user_id: int) -> bool:
         target = self.users.get_or_404(target_user_id)
         if target.id == user.id:

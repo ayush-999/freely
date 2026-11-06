@@ -88,17 +88,15 @@ try {
     timeout: 30000,
   })
   await bob.getByRole("button", { name: /Alice/ }).click()
-  const aSafety = await alice.getByLabel("Safety number for bob").innerText()
-  const bSafety = await bob.getByLabel("Safety number for alice").innerText()
-  assert.equal(aSafety, bSafety)
-  await expect(alice.getByLabel("Message", { exact: true })).toBeDisabled()
-  await alice.getByLabel("Matching safety number").fill(bSafety)
-  await alice
-    .getByRole("button", { name: "Verify device", exact: true })
-    .click()
-  await bob.getByLabel("Matching safety number").fill(aSafety)
-  await bob.getByRole("button", { name: "Verify device", exact: true }).click()
   await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled()
+  await expect(bob.getByLabel("Message", { exact: true })).toBeEnabled()
+  for (const page of [alice, bob]) {
+    await expect(page.getByLabel("Matching safety number")).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Verify device", exact: true })
+    ).toHaveCount(0)
+    await expect(page.getByText(/Verify.*devices?.*delivery/)).toHaveCount(0)
+  }
 
   const text =
     "Real relay private message 👋 <script>window.relayInsecure=true</script>"
@@ -117,6 +115,10 @@ try {
   await expect(
     bob.getByRole("log").getByText(fullText, { exact: true })
   ).toBeVisible({ timeout: 20000 })
+  await expect(
+    bob.getByLabel("1 messages received in this conversation")
+  ).toBeVisible()
+  await expect(bob.getByLabel("1 total messages received")).toBeVisible()
   assert.equal(await bob.evaluate(() => window.relayInsecure), undefined)
   assert.ok(
     !JSON.stringify(requests).includes(text),
@@ -127,6 +129,9 @@ try {
   await expect(alice.getByLabel("read", { exact: true })).toBeVisible({
     timeout: 20000,
   })
+  await expect(
+    bob.getByRole("link", { name: "Messaging", exact: true }).first()
+  ).toBeVisible()
 
   await bob.evaluate(() => {
     for (const socket of window.__relayChatSockets) {
@@ -187,7 +192,7 @@ try {
     "Real React + browser Signal + FastAPI HTTP/native WebSockets: PASS"
   )
   console.log(
-    "Verified real DTO/key upload/claim, safety-number matching, emoji, safe rendering, ciphertext-only requests, realtime receipt, reconnect and persisted history; zero database connections."
+    "Verified automatic first-use encrypted delivery without verification controls, real DTO/key upload/claim, emoji, safe rendering, ciphertext-only requests, received counts, realtime receipt, reconnect and persisted history; zero database connections."
   )
 } catch (error) {
   if (apiFailures.length) console.error("Relay API failures:", apiFailures)

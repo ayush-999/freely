@@ -19,6 +19,8 @@ const sockets = new Map(),
   requests = []
 const handles = ["test_alice", "test_bob"]
 let conversationExists = false
+let interruptNextSend = false
+let interruptedSends = 0
 const users = Object.fromEntries(
   handles.map((handle, index) => [
     handle,
@@ -42,18 +44,43 @@ const emit = (handle, type, data) => {
   for (const socket of sockets.get(handle) || [])
     socket.send(JSON.stringify({ type, data }))
 }
+const summary = (handle) => {
+  const received = messages.filter((message) => message.handle !== handle)
+  return {
+    received_count: received.length,
+    unread_count: received.filter(
+      (message) =>
+        !message.envelopes.some(
+          (envelope) =>
+            envelope.read &&
+            devices.find(
+              (device) =>
+                device.public_device_id === envelope.recipient_device_id
+            )?.user_handle === handle
+        )
+    ).length,
+  }
+}
 const conversation = (handle) => ({
   public_conversation_id: "conversation-ui",
   peer: users[handles.find((item) => item !== handle)],
   created_at: new Date().toISOString(),
-  updated_at: null,
+  updated_at: messages.at(-1)?.created_at ?? null,
+  ...summary(handle),
 })
-const status = (message) =>
-  message.envelopes.every((item) => item.read)
+const status = (message) => {
+  const peerEnvelopes = message.envelopes.filter(
+    (envelope) =>
+      devices.find(
+        (device) => device.public_device_id === envelope.recipient_device_id
+      )?.user_handle !== message.handle
+  )
+  return peerEnvelopes.some((item) => item.read)
     ? "read"
-    : message.envelopes.every((item) => item.delivered)
+    : peerEnvelopes.some((item) => item.delivered)
       ? "delivered"
       : "sent"
+}
 const view = (message, deviceId) => {
   const envelope = message.envelopes.find(
     (item) => item.recipient_device_id === deviceId
@@ -80,7 +107,7 @@ const available = (deviceId, kind) =>
       !claims.has(`${deviceId}:${kind}:${item.key_id}`)
   ).length
 
-async function client(handle) {
+async function client(handle, initialRoute = "/messages") {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
   })
@@ -126,6 +153,7 @@ async function client(handle) {
         protocol_version: "signal-pqxdh-v1",
         max_ciphertext_bytes: 65536,
       })
+    if (path === "/chat/summary") return reply(summary(handle))
     if (path === "/chat/devices" && method === "GET")
       return reply(
         devices
@@ -151,7 +179,7 @@ async function client(handle) {
       if (existing) return reply(existing)
       const device = {
         ...body,
-        public_device_id: `device-${handle}`,
+        public_device_id: `device-${handle}-${body.signal_device_id}`,
         user_handle: handle,
         created_at: new Date().toISOString(),
         revoked_at: null,
@@ -210,6 +238,11 @@ async function client(handle) {
       )
     }
     if (path === "/chat/messages" && method === "POST") {
+      if (interruptNextSend) {
+        interruptNextSend = false
+        interruptedSends++
+        return reply({ detail: "Temporary connection interruption" }, 503)
+      }
       let message = messages.find(
         (item) =>
           item.client_message_id === body.client_message_id &&
@@ -297,11 +330,17 @@ async function client(handle) {
         socket.onClose(() => own.delete(socket))
         socket.send(JSON.stringify({ type: "auth.ok", data: {} }))
       } else if (frame.type === "presence.subscribe") {
-        for (const peer of handles)
-          emit(peer, "user.online", {
-            public_conversation_id: "conversation-ui",
-            user_handle: handles.find((item) => item !== peer),
-          })
+        for (const peer of handles) {
+          const other = handles.find((item) => item !== peer)
+          emit(
+            peer,
+            sockets.get(other)?.size ? "user.online" : "user.offline",
+            {
+              public_conversation_id: "conversation-ui",
+              user_handle: other,
+            }
+          )
+        }
       } else if (frame.type.startsWith("typing.")) {
         emit(
           handles.find((item) => item !== handle),
@@ -315,36 +354,50 @@ async function client(handle) {
   page.on("pageerror", (error) =>
     process.stderr.write(`UI ${handle}: ${error.message}\n`)
   )
-  await page.goto(`${origin}/messages`)
-  await expect(
-    page.getByRole("heading", { name: "Messaging", exact: true })
-  ).toBeVisible()
-  await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+  await page.goto(`${origin}${initialRoute}`)
+  if (initialRoute.startsWith("/messages")) {
+    await expect(
+      page.getByRole("heading", { name: "Messaging", exact: true })
+    ).toBeVisible()
+    await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+  } else {
+    await expect
+      .poll(() => devices.some((device) => device.user_handle === handle), {
+        timeout: 15000,
+        message:
+          "Authenticated routes must set up messaging without opening the inbox",
+      })
+      .toBe(true)
+  }
   return page
 }
 
+async function expectDirectMessaging(page) {
+  await expect(
+    page.getByRole("button", { name: "Verify device", exact: true })
+  ).toHaveCount(0)
+  await expect(page.getByLabel("Matching safety number")).toHaveCount(0)
+  await expect(
+    page.getByText("Device verification", { exact: true })
+  ).toHaveCount(0)
+  await expect(
+    page.getByText(/Verify .* devices? for message delivery/)
+  ).toHaveCount(0)
+  await expect(page.getByText(/Verify the devices above/)).toHaveCount(0)
+}
+
 try {
-  const alice = await client("test_alice"),
-    bob = await client("test_bob")
+  const alice = await client("test_alice")
   await alice.getByLabel("Find people").fill("bob")
   await alice.getByRole("button", { name: /Bob Test/ }).click()
-  await bob.reload()
-  await bob.getByRole("button", { name: /Alice Test/ }).click()
-  const aSafety = await alice
-    .getByLabel("Safety number for test_bob")
-    .innerText()
-  const bSafety = await bob
-    .getByLabel("Safety number for test_alice")
-    .innerText()
-  assert.equal(aSafety, bSafety)
-  await expect(alice.getByLabel("Message", { exact: true })).toBeDisabled()
-  await alice.getByLabel("Matching safety number").fill(bSafety)
-  await alice
-    .getByRole("button", { name: "Verify device", exact: true })
-    .click()
-  await bob.getByLabel("Matching safety number").fill(aSafety)
-  await bob.getByRole("button", { name: "Verify device", exact: true }).click()
+  // A recipient who has never opened Messaging must not block composition.
+  // The pending message is archived locally until encryption can be prepared.
+  assert.equal(
+    devices.some((device) => device.user_handle === "test_bob"),
+    false
+  )
   await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled()
+  await expectDirectMessaging(alice)
   const text = "Private UI message 👋 <script>window.insecure=true</script>"
   await alice.getByLabel("Message", { exact: true }).fill(text)
   await alice.getByRole("button", { name: "Add emoji", exact: true }).click()
@@ -359,10 +412,79 @@ try {
   assert.ok(fullText.length > text.length)
   await alice.getByRole("button", { name: "Send", exact: true }).click()
   await expect(
+    alice.getByRole("log").getByText(fullText, { exact: true })
+  ).toBeVisible()
+  await expect(alice.getByLabel("pending", { exact: true })).toBeVisible()
+  await expect(
+    alice.getByRole("status", { name: "Queued message status" })
+  ).toHaveText(
+    "Saved on this device. Waiting for the recipient to set up messaging before delivery."
+  )
+  await expect(alice.getByLabel("Message", { exact: true })).toHaveValue("")
+  assert.equal(
+    messages.length,
+    0,
+    "A local queue must not claim server acceptance"
+  )
+  assert.equal(
+    requests.filter((request) => request.path === "/chat/messages").length,
+    0
+  )
+  await alice.reload()
+  await expect(alice).toHaveURL(/\/messages\?to=test_bob$/)
+  await expect(
+    alice.getByRole("log").getByText(fullText, { exact: true })
+  ).toBeVisible()
+  await expect(alice.getByLabel("pending", { exact: true })).toBeVisible()
+  await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled()
+  assert.equal(messages.length, 0, "Reload must retain the local unsent queue")
+  await mkdir("../../../.tools/chat-ui", { recursive: true })
+  await alice.screenshot({
+    path: "../../../.tools/chat-ui/queued.png",
+    fullPage: true,
+  })
+
+  // Registering a valid recipient device automatically resumes queued delivery.
+  // Neither person needs to compare numbers or click a verification control.
+  interruptNextSend = true
+  const bob = await client("test_bob", "/coming-soon?feature=Messaging%20test")
+  await expect.poll(() => interruptedSends, { timeout: 15000 }).toBe(1)
+  await expect(alice.getByLabel("pending", { exact: true })).toBeVisible()
+  await expectDirectMessaging(alice)
+  // The authenticated messaging session must keep retrying its outbox when
+  // both users leave the inbox, without keeping a selected conversation open.
+  await alice.goto(`${origin}/coming-soon?feature=Messaging%20test`)
+  await expect(
+    bob
+      .getByRole("link", { name: "Messaging, 1 unread message", exact: true })
+      .filter({ visible: true })
+  ).toBeVisible({ timeout: 15000 })
+  assert.deepEqual(summary("test_bob"), { received_count: 1, unread_count: 1 })
+  assert.deepEqual(summary("test_alice"), {
+    received_count: 0,
+    unread_count: 0,
+  })
+  await alice.goto(`${origin}/messages?to=test_bob`)
+  await expect(
+    alice.getByRole("log").getByText(fullText, { exact: true })
+  ).toBeVisible()
+  await bob.goto(`${origin}/messages?to=test_alice`)
+  await expectDirectMessaging(bob)
+  await expect(
     bob.getByRole("log").getByText(fullText, { exact: true })
+  ).toBeVisible({ timeout: 15000 })
+  await expect(
+    bob.getByLabel("1 total messages received", { exact: true })
+  ).toBeVisible({ timeout: 15000 })
+  await expect(
+    bob.getByLabel("1 messages received in this conversation", { exact: true })
   ).toBeVisible({ timeout: 15000 })
   assert.equal(await bob.evaluate(() => window.insecure), undefined)
   assert.equal(messages.length, 1)
+  assert.equal(
+    new Set(messages.map((message) => message.client_message_id)).size,
+    1
+  )
   assert.ok(!JSON.stringify(messages).includes(text))
   assert.ok(
     !JSON.stringify(
@@ -374,17 +496,39 @@ try {
   await expect(alice.getByLabel("read", { exact: true })).toBeVisible({
     timeout: 15000,
   })
+  await expect(
+    bob
+      .getByRole("link", { name: "Messaging", exact: true })
+      .filter({ visible: true })
+  ).toBeVisible({ timeout: 15000 })
+  assert.deepEqual(summary("test_bob"), { received_count: 1, unread_count: 0 })
   const bobSocket = [...sockets.get("test_bob")][0]
   bobSocket.close({ code: 1012, reason: "Test reconnect" })
   await expect(bob.getByText("Connected", { exact: true })).toBeVisible({
     timeout: 15000,
   })
   await bob.reload()
-  await bob.getByRole("button", { name: /Alice Test/ }).click()
+  // The selected peer is encoded in the URL so reloading preserves the thread.
+  await expect(bob).toHaveURL(/\/messages\?to=test_alice$/)
   await expect(
     bob.getByRole("log").getByText(fullText, { exact: true })
   ).toBeVisible()
   await expect(bob.getByLabel("Message", { exact: true })).toBeEnabled()
+  // A newly registered second device must not introduce another manual gate.
+  // The next encrypted reply also syncs to this device automatically.
+  const bobSecond = await client(
+    "test_bob",
+    "/coming-soon?feature=Messaging%20test"
+  )
+  await expect
+    .poll(
+      () =>
+        devices.filter((device) => device.user_handle === "test_bob").length,
+      { timeout: 15000 }
+    )
+    .toBe(2)
+  await expect.poll(() => keys.size, { timeout: 15000 }).toBe(3)
+  await expectDirectMessaging(bob)
   await bob
     .getByLabel("Message", { exact: true })
     .fill("Reply after reconnect 🔐")
@@ -394,14 +538,49 @@ try {
       .getByRole("log")
       .getByText("Reply after reconnect 🔐", { exact: true })
   ).toBeVisible({ timeout: 15000 })
+  await bobSecond.goto(`${origin}/messages?to=test_alice`)
+  await expect(
+    bobSecond
+      .getByRole("log")
+      .getByText("Reply after reconnect 🔐", { exact: true })
+  ).toBeVisible({ timeout: 15000 })
+  await expectDirectMessaging(bobSecond)
+  const reply = messages.at(-1)
+  assert.equal(reply.handle, "test_bob")
+  assert.equal(
+    reply.envelopes.length,
+    2,
+    "Encrypted fan-out includes the recipient and the sender's new second device"
+  )
+  assert.equal(
+    new Set(reply.envelopes.map((envelope) => envelope.recipient_device_id))
+      .size,
+    2
+  )
+  assert.ok(!JSON.stringify(reply).includes("Reply after reconnect"))
+  await expect(
+    alice.getByLabel("1 total messages received", { exact: true })
+  ).toBeVisible({ timeout: 15000 })
   await mkdir("../../../.tools/chat-ui", { recursive: true })
   await alice.screenshot({
     path: "../../../.tools/chat-ui/desktop.png",
     fullPage: true,
   })
+  await alice.emulateMedia({ colorScheme: "dark" })
+  await expect(alice.locator("html")).toHaveClass(/dark/)
+  await alice.screenshot({
+    path: "../../../.tools/chat-ui/desktop-dark.png",
+    fullPage: true,
+  })
   await bob.setViewportSize({ width: 390, height: 844 })
   await bob.screenshot({
     path: "../../../.tools/chat-ui/mobile.png",
+    fullPage: true,
+  })
+  await bob.emulateMedia({ colorScheme: "dark" })
+  await expect(bob.locator("html")).toHaveClass(/dark/)
+  await bob.screenshot({
+    path: "../../../.tools/chat-ui/mobile-dark.png",
     fullPage: true,
   })
   assert.equal(
@@ -417,7 +596,7 @@ try {
     "Real React UI + real browser Signal + intercepted REST/WebSockets: PASS"
   )
   console.log(
-    "Verified device matching, emoji composition, safe rendering, ciphertext-only relay, realtime reception, read receipt, reconnect/history persistence, responsive width."
+    "Verified direct encrypted delivery without manual verification, legacy pending recovery on recipient setup, durable queue, authenticated device setup outside Messaging, background retry, automatic multi-device fan-out, emoji composition, safe rendering, ciphertext-only relay, off-page unread badge, received counts, read receipt/badge clearing, selected-thread/history persistence, responsive width and light/dark themes."
   )
 } finally {
   for (const context of contexts) await context.close()

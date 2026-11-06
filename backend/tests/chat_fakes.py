@@ -39,6 +39,20 @@ class FakeRepository:
     def conversation_by_id(self, row_id):
         return next((row for row in self.rows[ChatConversation] if row.id == row_id), None)
 
+    def conversation_counts(self, user_id, conversation_ids=None):
+        allowed = {row.id for row in self.rows[ChatConversation]
+                   if user_id in (row.participant_low_user_id, row.participant_high_user_id)
+                   and (conversation_ids is None or row.id in conversation_ids)}
+        counts = {}
+        for row in self.rows[ChatMessage]:
+            if row.conversation_id not in allowed or row.sender_user_id == user_id:
+                continue
+            received, unread = counts.get(row.conversation_id, (0, 0))
+            read = any(envelope.recipient_user_id == user_id and envelope.read_at is not None
+                       for envelope in self.envelopes(row.id))
+            counts[row.conversation_id] = (received + 1, unread + int(not read))
+        return counts
+
     def devices(self, user_id, active_only=True):
         return [row for row in self.rows[ChatDevice] if row.user_id == user_id and (not active_only or row.revoked_at is None)]
 

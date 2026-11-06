@@ -94,6 +94,11 @@ function trust(state: VaultState, peerId: string): PeerTrust {
   }
 }
 
+function validateMessageText(text: string): void {
+  if (!text.trim() || new TextEncoder().encode(text).length > 16_000)
+    throw new Error("Enter a message of at most 16,000 UTF-8 bytes")
+}
+
 /**
  * Account-scoped encrypted IndexedDB vault. The nonextractable AES key is stored
  * as a CryptoKey by the browser; no private material enters localStorage.
@@ -323,6 +328,93 @@ export class ChatCrypto {
     return this.mutate((state) => this.prepareState(state, input))
   }
 
+  /** Keep an outgoing message in the sealed archive until recipients are ready.
+   * No destination keys are claimed and no plaintext is sent to the server. */
+  queueMessage(input: {
+    conversation_id: string
+    client_message_id: string
+    text: string
+  }): Promise<HistoryMessage> {
+    return this.mutate((state) => {
+      const ownId = state.device?.publicDeviceId
+      if (!ownId)
+        throw new Error("Register this browser's encryption identity first")
+      validateMessageText(input.text)
+      const existing = state.history.find(
+        (item) =>
+          item.client_message_id === input.client_message_id &&
+          item.sender_device_id === ownId
+      )
+      if (existing) {
+        if (
+          existing.conversation_id !== input.conversation_id ||
+          existing.text !== input.text ||
+          existing.sender_handle !== state.account
+        )
+          throw new Error(
+            "Client message ID was already used for different content"
+          )
+        return existing
+      }
+      const message: HistoryMessage = {
+        public_message_id: null,
+        conversation_id: input.conversation_id,
+        client_message_id: input.client_message_id,
+        sender_device_id: ownId,
+        sender_handle: state.account,
+        text: input.text,
+        created_at: new Date().toISOString(),
+        status: "pending",
+      }
+      state.history.push(message)
+      return message
+    })
+  }
+
+  /** Unprepared messages are distinct from the outbox's immutable retry bytes. */
+  queuedMessages(): Promise<HistoryMessage[]> {
+    return this.mutate((state) => {
+      const preparedIds = new Set(
+        state.outbox.map((item) => item.client_message_id)
+      )
+      return state.history.filter(
+        (item) =>
+          item.sender_handle === state.account &&
+          item.sender_device_id === state.device?.publicDeviceId &&
+          item.status === "pending" &&
+          item.public_message_id === null &&
+          !preparedIds.has(item.client_message_id)
+      )
+    }, false)
+  }
+
+  prepareQueuedMessage(
+    clientId: string,
+    peers: PeerBundle[]
+  ): Promise<PreparedMessage> {
+    return this.mutate((state) => {
+      const prepared = state.outbox.find(
+        (item) => item.client_message_id === clientId
+      )
+      if (prepared) return prepared
+      const queued = state.history.find(
+        (item) =>
+          item.client_message_id === clientId &&
+          item.sender_handle === state.account &&
+          item.sender_device_id === state.device?.publicDeviceId &&
+          item.status === "pending" &&
+          item.public_message_id === null
+      )
+      if (!queued) throw new Error("This message is not waiting to be prepared")
+      return this.prepareState(state, {
+        conversation_id: queued.conversation_id,
+        client_message_id: queued.client_message_id,
+        text: queued.text,
+        peers,
+      })
+    })
+  }
+
   /** Only call after the server definitively rejected the old send (HTTP 409).
    * Ambiguous network failures must retry the original outbox bytes instead. */
   repreparePending(
@@ -365,15 +457,27 @@ export class ChatCrypto {
     const ownId = state.device?.publicDeviceId
     if (!ownId)
       throw new Error("Register this browser's encryption identity first")
-    if (
-      !input.text.trim() ||
-      new TextEncoder().encode(input.text).length > 16_000
+    validateMessageText(input.text)
+    const archived = state.history.find(
+      (item) =>
+        item.client_message_id === input.client_message_id &&
+        item.sender_device_id === ownId
     )
-      throw new Error("Enter a message of at most 16,000 UTF-8 bytes")
+    if (
+      archived &&
+      (archived.conversation_id !== input.conversation_id ||
+        archived.text !== input.text ||
+        archived.sender_handle !== state.account)
+    )
+      throw new Error(
+        "Client message ID was already used for different content"
+      )
     const prior = state.outbox.find(
       (item) => item.client_message_id === input.client_message_id
     )
     if (prior) return prior
+    if (archived && archived.status !== "pending")
+      throw new Error("Only pending local messages can be prepared")
     if (
       !input.peers.length ||
       new Set(input.peers.map((peer) => peer.public_device_id)).size !==
@@ -390,11 +494,13 @@ export class ChatCrypto {
         envelopes: [],
       }
       for (const peer of input.peers) {
-        await engine.validatePeer(peer)
-        if (!state.peers[peer.public_device_id]?.verified)
-          throw new Error(
-            "Verify every destination device's safety number before sending"
-          )
+        const validated = await engine.validatePeer(peer)
+        // Signed bundles establish first-use trust. Keep the identity pin for
+        // future comparisons without claiming an out-of-band verification.
+        state.peers[peer.public_device_id] = {
+          bundle: structuredClone(validated),
+          verified: state.peers[peer.public_device_id]?.verified ?? false,
+        }
         const clear = JSON.stringify({
           version: 1,
           conversation_id: input.conversation_id,
@@ -412,16 +518,17 @@ export class ChatCrypto {
         })
       }
       state.outbox.push(prepared)
-      state.history.push({
-        public_message_id: null,
-        conversation_id: input.conversation_id,
-        client_message_id: input.client_message_id,
-        sender_device_id: ownId,
-        sender_handle: state.account,
-        text: input.text,
-        created_at: new Date().toISOString(),
-        status: "pending",
-      })
+      if (!archived)
+        state.history.push({
+          public_message_id: null,
+          conversation_id: input.conversation_id,
+          client_message_id: input.client_message_id,
+          sender_device_id: ownId,
+          sender_handle: state.account,
+          text: input.text,
+          created_at: new Date().toISOString(),
+          status: "pending",
+        })
       return prepared
     } finally {
       engine.close()

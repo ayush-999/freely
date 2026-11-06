@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
+from app.schemas.identity import UserPublicResponse
 
 PostVisibility = Literal["public", "followers", "department", "private"]
 MediaType = Literal["image", "video", "document"]
@@ -150,3 +151,20 @@ class RepostRequest(BaseModel):
 class ModerationRequest(BaseModel):
     moderation_status: ModerationStatus
     reason: Optional[str] = None
+
+
+class UserRelationshipResponse(BaseModel):
+    """Public social counts plus the current viewer's relationship, never IDs."""
+
+    user_handle: str
+    followers_count: int = Field(ge=0)
+    following_count: int = Field(ge=0)
+    is_following: bool = False
+    follows_you: bool = False
+    is_self: bool = False
+
+
+class RelationshipPersonResponse(UserPublicResponse):
+    is_following: bool = False
+    follows_you: bool = False
+    is_self: bool = False

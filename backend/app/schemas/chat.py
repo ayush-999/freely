@@ -53,6 +53,13 @@ class ConversationPublic(BaseModel):
     peer: PeerPublic
     created_at: datetime
     updated_at: datetime | None = None
+    received_count: int = 0
+    unread_count: int = 0
+
+
+class MessageSummary(BaseModel):
+    received_count: int = 0
+    unread_count: int = 0
 
 
 class DeviceRegister(ChatInput):

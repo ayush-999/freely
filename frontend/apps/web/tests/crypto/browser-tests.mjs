@@ -29,37 +29,137 @@ try {
     await b.provision(1)
     await a.attachDevice("alice-browser")
     await b.attachDevice("bob-browser")
+    const clientId = crypto.randomUUID(),
+      text = "Hello 👋🏽 🧑‍💻 <script>text only</script>"
+    const draft = {
+      conversation_id: "conversation",
+      client_message_id: clientId,
+      text,
+    }
+    const [queued, repeatedQueue] = await Promise.all([
+      a.queueMessage(draft),
+      a.queueMessage(draft),
+    ])
+    if (
+      queued.status !== "pending" ||
+      queued.public_message_id !== null ||
+      queued.created_at !== repeatedQueue.created_at ||
+      (await a.history("conversation")).length !== 1 ||
+      (await a.outbox()).length !== 0
+    )
+      throw Error("Queue did not preserve one local pending message")
+    let conflictBlocked = false
+    try {
+      await a.queueMessage({ ...draft, text: "different content" })
+    } catch {
+      conflictBlocked = true
+    }
+    if (!conflictBlocked) throw Error("Queue allowed a conflicting message ID")
+    a.close()
+    a = await ChatCrypto.open(ah)
+    const restoredQueue = await a.queuedMessages()
+    if (
+      restoredQueue.length !== 1 ||
+      restoredQueue[0].text !== text ||
+      restoredQueue[0].sender_device_id !== "alice-browser" ||
+      restoredQueue[0].created_at !== queued.created_at
+    )
+      throw Error("Queued message did not survive reopening encrypted storage")
+    const queuedRaw = await new Promise((resolve, reject) => {
+      const opening = indexedDB.open(`freely-chat:${ah}`, 1)
+      opening.onsuccess = () => {
+        const db = opening.result
+        const request = db
+          .transaction("records")
+          .objectStore("records")
+          .get("state")
+        request.onsuccess = () => {
+          resolve(request.result)
+          db.close()
+        }
+        request.onerror = () => reject(Error("Cannot read queued test storage"))
+      }
+    })
+    if (JSON.stringify(queuedRaw).includes(text))
+      throw Error("Queued plaintext persisted outside the sealed archive")
     const am = await a.getDevice(),
       bm = await b.getDevice()
     const ab = { ...am, user_handle: ah },
       bb = { ...bm, user_handle: bh }
-    await a.acceptPeer(bb)
-    await b.acceptPeer(ab)
-    let blocked = false
+
+    // A valid signed directory bundle is enough for first-use delivery. It
+    // pins the identity, but must not masquerade as manual verification.
+    let fresh = await ChatCrypto.open(`fresh_${suffix}`)
+    await fresh.provision(1)
+    await fresh.attachDevice("fresh-browser")
+    const invalidFirstUse = structuredClone(bb)
+    const signedFirstUse = invalidFirstUse.prekeys.find(
+      (item) => item.key_kind === "ec_signed"
+    )
+    const invalidSignature = window.harness.decode64(signedFirstUse.signature)
+    invalidSignature[0] ^= 1
+    signedFirstUse.signature = window.harness.encode64(invalidSignature)
+    let firstUseSignatureBlocked = false
     try {
-      await a.prepareMessage({
-        conversation_id: "conversation",
+      await fresh.prepareMessage({
+        conversation_id: "first-use",
         client_message_id: crypto.randomUUID(),
-        text: "unverified",
-        peers: [bb],
+        text: "must reject invalid first-use signatures",
+        peers: [invalidFirstUse],
       })
     } catch {
-      blocked = true
+      firstUseSignatureBlocked = true
     }
-    if (!blocked) throw Error("Unverified destination was accepted")
+    if (
+      !firstUseSignatureBlocked ||
+      (await fresh.getPeer("bob-browser")) !== null ||
+      (await fresh.outbox()).length
+    )
+      throw Error("Invalid first-use signature was accepted or persisted")
+    await fresh.prepareMessage({
+      conversation_id: "first-use",
+      client_message_id: crypto.randomUUID(),
+      text: "send directly without a manual step",
+      peers: [bb],
+    })
+    if (
+      (await fresh.listTrust())[0].verified ||
+      (await fresh.getPeer("bob-browser")).identity_public_key !==
+        bb.identity_public_key
+    )
+      throw Error(
+        "Automatic first use lost the identity pin or claimed manual verification"
+      )
+    fresh.close()
+    fresh = await ChatCrypto.open(`fresh_${suffix}`)
+    await fresh.prepareMessage({
+      conversation_id: "first-use",
+      client_message_id: crypto.randomUUID(),
+      text: "direct delivery after reloading an unverified pin",
+      peers: [bb],
+    })
+    if (
+      (await fresh.listTrust())[0].verified ||
+      (await fresh.history("first-use")).length !== 2
+    )
+      throw Error("Unverified first-use identity could not send after reload")
+    fresh.close()
+
+    await a.acceptPeer(bb)
+    await b.acceptPeer(ab)
+    if ((await a.listTrust())[0].verified || (await b.listTrust())[0].verified)
+      throw Error(
+        "Accepting a directory bundle falsely marked manual verification"
+      )
+    // Legacy archives already have unverified pins and locally queued messages.
+    // Reopening must resume them without resetting history or asking for codes.
+    a.close()
+    a = await ChatCrypto.open(ah)
     const af = await a.fingerprint("bob-browser"),
       bf = await b.fingerprint("alice-browser")
     if (af.displayable !== bf.displayable) throw Error("Safety numbers differ")
-    await a.verifyPeer("bob-browser", bf.displayable)
-    await b.verifyPeer("alice-browser", af.displayable)
-    const clientId = crypto.randomUUID(),
-      text = "Hello 👋🏽 🧑‍💻 <script>text only</script>"
-    const prepared = await a.prepareMessage({
-      conversation_id: "conversation",
-      client_message_id: clientId,
-      text,
-      peers: [bb],
-    })
+    const prepared = await a.prepareQueuedMessage(clientId, [bb])
+    const preparedAgain = await a.prepareQueuedMessage(clientId, [bb])
     const retry = await a.prepareMessage({
       conversation_id: "conversation",
       client_message_id: clientId,
@@ -68,6 +168,13 @@ try {
     })
     if (JSON.stringify(prepared) !== JSON.stringify(retry))
       throw Error("Retry encrypted twice")
+    if (
+      JSON.stringify(prepared) !== JSON.stringify(preparedAgain) ||
+      (await a.queuedMessages()).length !== 0 ||
+      (await a.history("conversation")).length !== 1 ||
+      (await a.history("conversation"))[0].created_at !== queued.created_at
+    )
+      throw Error("Queued preparation changed identity, timestamp or history")
     const envelope = {
       ...prepared.envelopes[0],
       public_message_id: "message",
@@ -85,10 +192,16 @@ try {
     a = await ChatCrypto.open(ah)
     b = await ChatCrypto.open(bh)
     if (
-      !(await a.listTrust())[0].verified ||
-      !(await b.listTrust())[0].verified
+      (await a.listTrust())[0].verified ||
+      (await b.listTrust())[0].verified ||
+      (await a.getPeer("bob-browser")).identity_public_key !==
+        bb.identity_public_key ||
+      (await b.getPeer("alice-browser")).identity_public_key !==
+        ab.identity_public_key
     )
-      throw Error("Verified identity did not survive reload")
+      throw Error(
+        "Automatic identity pins or manual verification state changed on reload"
+      )
     if ((await b.history("conversation"))[0].text !== text)
       throw Error("Encrypted history did not survive reload")
     await b.receive(envelope)
@@ -299,11 +412,17 @@ try {
     if (!closedBlocked) throw Error("Closed account vault remained usable")
     return {
       unicode: true,
-      verification: true,
+      automaticFirstUse: true,
+      firstUseSignatureValidation: true,
+      honestManualVerificationState: true,
+      legacyUnverifiedReload: true,
       identityReload: true,
       replayReload: true,
       historyReload: true,
       encryptedStorage: true,
+      encryptedQueueReload: true,
+      queuedMessageIdempotency: true,
+      queuedAutomaticPreparation: true,
       outboxIdempotency: true,
       metadataBindingAndRollback: true,
       storageFailureRollback: true,
